@@ -1,0 +1,101 @@
+/// Certified view pbi.vw_McrCoverageSummary. One row per coverage classification. Reports lineage coverage as classification with required domain and accountable steward, never as a bare percentage.
+table 'Coverage Summary'
+	lineageTag: 38e929fd-1603-441a-bdff-70bd809f920d
+
+	column CoverageStatusCode
+		dataType: string
+		lineageTag: 0ab00128-c6f5-49d3-96e2-13cb3e64c7d0
+		summarizeBy: none
+		sourceColumn: CoverageStatusCode
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column TargetProjectCode
+		dataType: string
+		lineageTag: b68c1156-64d9-4771-b709-e7dc7abe8cb7
+		summarizeBy: none
+		sourceColumn: TargetProjectCode
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column CoverageStatusName
+		dataType: string
+		lineageTag: 91585c84-f7e5-426f-a2d3-bcd752d24819
+		summarizeBy: none
+		sourceColumn: CoverageStatusName
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column Items
+		dataType: int64
+		formatString: 0
+		lineageTag: 95c1027f-82bf-46e4-9867-1d3c09c37793
+		summarizeBy: sum
+		sourceColumn: Items
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column TraceableItems
+		dataType: int64
+		formatString: 0
+		lineageTag: 79a05a91-4b5e-42c7-bb3b-1d943907f556
+		summarizeBy: sum
+		sourceColumn: TraceableItems
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column RequiredDomains
+		dataType: int64
+		formatString: 0
+		lineageTag: 71a1e520-0ee1-45fa-90a1-597efb18cbc5
+		summarizeBy: sum
+		sourceColumn: RequiredDomains
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column AccountableStewards
+		dataType: int64
+		formatString: 0
+		lineageTag: e0731249-d94e-4333-b100-36559cdeea2e
+		summarizeBy: sum
+		sourceColumn: AccountableStewards
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column StewardList
+		dataType: string
+		lineageTag: 438a4cc8-c752-41c9-82ea-b107b6621831
+		summarizeBy: none
+		sourceColumn: StewardList
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Coverage Summary' = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Database("paige.database.windows.net", "MortgageGovernance"),
+				    pbi_vw_McrCoverageSummary = Source{[Schema="pbi",Item="vw_McrCoverageSummary"]}[Data]
+				in
+				    pbi_vw_McrCoverageSummary
+
+	annotation PBI_NavigationStepName = Navigation
+
+	annotation PBI_ResultType = Table
+

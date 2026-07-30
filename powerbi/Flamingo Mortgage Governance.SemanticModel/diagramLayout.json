@@ -1,0 +1,87 @@
+{
+  "version": "1.1.0",
+  "diagrams": [
+    {
+      "ordinal": 0,
+      "scrollPosition": {
+        "x": 0,
+        "y": 0
+      },
+      "nodes": [
+        {
+          "location": {
+            "x": 852.36163941535983,
+            "y": 30.129941727546026
+          },
+          "nodeIndex": "Coverage Summary",
+          "nodeLineageTag": "38e929fd-1603-441a-bdff-70bd809f920d",
+          "size": {
+            "height": 272,
+            "width": 234
+          },
+          "zIndex": 2
+        },
+        {
+          "location": {
+            "x": 334.1847511806298,
+            "y": -31.065109177344198
+          },
+          "nodeIndex": "Data Product",
+          "nodeLineageTag": "86fa155d-ce5d-43e5-9eb1-489732b4749a",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 4
+        },
+        {
+          "location": {
+            "x": 50,
+            "y": -50
+          },
+          "nodeIndex": "Exception Register",
+          "nodeLineageTag": "7a35968a-0809-424e-b9cb-911022331a78",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 3
+        },
+        {
+          "location": {
+            "x": 618.36163941535983,
+            "y": -17.740116544907949
+          },
+          "nodeIndex": "Filing Tie-Out",
+          "nodeLineageTag": "6632a029-cb63-4975-b046-fea7425543b1",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 1
+        },
+        {
+          "location": {
+            "x": 1086.3616394153598,
+            "y": 124.064970863773
+          },
+          "nodeIndex": "_Measures",
+          "nodeLineageTag": "5d77cce9-cc71-46c6-96b9-1da062d3fcbe",
+          "size": {
+            "height": 104,
+            "width": 234
+          },
+          "zIndex": 0
+        }
+      ],
+      "name": "All tables",
+      "zoomValue": 100,
+      "pinKeyFieldsToTop": false,
+      "showExtraHeaderInfo": false,
+      "hideKeyFieldsWhenCollapsed": false,
+      "tablesLocked": false
+    }
+  ],
+  "selectedDiagram": "All tables",
+  "defaultDiagram": "All tables"
+}

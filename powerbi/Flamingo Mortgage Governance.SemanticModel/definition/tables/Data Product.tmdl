@@ -1,0 +1,188 @@
+/// Certified view pbi.vw_McrDataProduct. Single row. Data product certification status, item counts, and the filing certification status of the latest governed filing.
+table 'Data Product'
+	lineageTag: 86fa155d-ce5d-43e5-9eb1-489732b4749a
+
+	column DataProductCode
+		dataType: string
+		lineageTag: 15a8dd90-87c3-45e7-8613-b04743604e66
+		summarizeBy: none
+		sourceColumn: DataProductCode
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column DataProductName
+		dataType: string
+		lineageTag: 5821b321-4e81-413d-8b48-cea0c6e7bea2
+		summarizeBy: none
+		sourceColumn: DataProductName
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column ProductCertificationStatus
+		dataType: string
+		lineageTag: 156d8985-9797-4540-a0cd-1327fecd57f2
+		summarizeBy: none
+		sourceColumn: ProductCertificationStatus
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column ProductCertifiedBy
+		dataType: string
+		lineageTag: 57558def-2c8e-42a0-811e-e2023619be34
+		summarizeBy: none
+		sourceColumn: ProductCertifiedBy
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column ProductCertifiedDateUtc
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: c5e1a488-b073-405e-93ce-1964076a65a9
+		summarizeBy: none
+		sourceColumn: ProductCertifiedDateUtc
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column TotalFv7Items
+		dataType: int64
+		formatString: 0
+		lineageTag: 66e55690-894e-4136-ae1b-67ba678c38c2
+		summarizeBy: sum
+		sourceColumn: TotalFv7Items
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column LineageEligibleItems
+		dataType: int64
+		formatString: 0
+		lineageTag: aa1fc4ee-79a3-4019-bd6a-210e65d4b964
+		summarizeBy: sum
+		sourceColumn: LineageEligibleItems
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column TraceableToSourceItems
+		dataType: int64
+		formatString: 0
+		lineageTag: 61c26bc4-76ae-4903-8d09-bb314af29c39
+		summarizeBy: sum
+		sourceColumn: TraceableToSourceItems
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column CoverageStatement
+		dataType: string
+		lineageTag: 3271d08e-98f1-4485-aaad-b7396c7c85db
+		summarizeBy: none
+		sourceColumn: CoverageStatement
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column LatestGovernedFilingId
+		dataType: int64
+		formatString: 0
+		lineageTag: 265866d8-2c76-46f8-8803-0347c9cc98e6
+		summarizeBy: count
+		sourceColumn: LatestGovernedFilingId
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column LatestFilingPeriodEnd
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: 80b828a5-fcd0-4e04-a63b-d1b6b58f705c
+		summarizeBy: none
+		sourceColumn: LatestFilingPeriodEnd
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column FilingCertificationStatus
+		dataType: string
+		lineageTag: 182d7254-6a47-489e-ab39-ceafa7caba6a
+		summarizeBy: none
+		sourceColumn: FilingCertificationStatus
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column FilingControlsEvaluated
+		dataType: int64
+		formatString: 0
+		lineageTag: c9d8e171-246b-4b75-be85-c1cbece8ff4f
+		summarizeBy: sum
+		sourceColumn: FilingControlsEvaluated
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column FilingBlockingFailures
+		dataType: int64
+		formatString: 0
+		lineageTag: fcfa3934-807f-4e62-82e1-61f4c3fd3331
+		summarizeBy: sum
+		sourceColumn: FilingBlockingFailures
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column FilingValidationErrors
+		dataType: int64
+		formatString: 0
+		lineageTag: 27513e2a-540c-4e7a-a9b1-f470cafdc481
+		summarizeBy: sum
+		sourceColumn: FilingValidationErrors
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column ScopeCaveat
+		dataType: string
+		lineageTag: 7385a2e4-403a-4d6c-8747-e35512aa2583
+		summarizeBy: none
+		sourceColumn: ScopeCaveat
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Data Product' = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Database("paige.database.windows.net", "MortgageGovernance"),
+				    pbi_vw_McrDataProduct = Source{[Schema="pbi",Item="vw_McrDataProduct"]}[Data]
+				in
+				    pbi_vw_McrDataProduct
+
+	annotation PBI_NavigationStepName = Navigation
+
+	annotation PBI_ResultType = Table
+

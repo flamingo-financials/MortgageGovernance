@@ -1,0 +1,201 @@
+/// Certified view pbi.vw_McrExceptionRegister. Open data quality exceptions routed from MCR filing findings, each carrying the filing certification status.
+table 'Exception Register'
+	lineageTag: 7a35968a-0809-424e-b9cb-911022331a78
+
+	column DataExceptionId
+		dataType: int64
+		formatString: 0
+		lineageTag: d293b74b-969d-4217-89dd-03397415bfcb
+		summarizeBy: count
+		sourceColumn: DataExceptionId
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column FilingId
+		dataType: int64
+		formatString: 0
+		lineageTag: 2ad8d608-d08c-4741-85fc-350e9ed05f20
+		summarizeBy: count
+		sourceColumn: FilingId
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column RuleCode
+		dataType: string
+		lineageTag: f718ad43-bbc8-4852-b817-2d4acfa20106
+		summarizeBy: none
+		sourceColumn: RuleCode
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column RuleName
+		dataType: string
+		lineageTag: 7131fb0f-42c4-46f9-8395-9793775d50d9
+		summarizeBy: none
+		sourceColumn: RuleName
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column DqDimensionCode
+		dataType: string
+		lineageTag: 497db379-48c7-4767-bd7f-3b5cc9521fc3
+		summarizeBy: none
+		sourceColumn: DqDimensionCode
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column SeverityCode
+		dataType: string
+		lineageTag: 3f42ca96-6e07-49b8-8431-ad00d9500344
+		summarizeBy: none
+		sourceColumn: SeverityCode
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column BlockingFlag
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: 4f8bffff-ae1d-4b10-bc04-4a141cf3b0e3
+		summarizeBy: none
+		sourceColumn: BlockingFlag
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column KeyValue1
+		dataType: string
+		lineageTag: 91cd5988-6406-423c-b292-d940cd62de6c
+		summarizeBy: none
+		sourceColumn: KeyValue1
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column StatusCode
+		dataType: string
+		lineageTag: 3d88ace7-41f5-4d1e-944f-1d6d29224f9c
+		summarizeBy: none
+		sourceColumn: StatusCode
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column OpenedDate
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: 094da1f0-7558-4f61-a79a-16c69c225d33
+		summarizeBy: none
+		sourceColumn: OpenedDate
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column DueDate
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: 3093672a-0162-490c-b95c-9f0a00bc5d23
+		summarizeBy: none
+		sourceColumn: DueDate
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column ClosedDate
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: 297586b0-db8d-4cc7-9ba8-d80bce6fbcd8
+		summarizeBy: none
+		sourceColumn: ClosedDate
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column ResolutionNote
+		dataType: string
+		lineageTag: 939d9ba5-e83b-45e7-af67-03ebb2cfc8ba
+		summarizeBy: none
+		sourceColumn: ResolutionNote
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column ExceptionOwner
+		dataType: string
+		lineageTag: 925493c1-e7a5-4626-bd97-c1d8618f7b3b
+		summarizeBy: none
+		sourceColumn: ExceptionOwner
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column AgeDays
+		dataType: int64
+		formatString: 0
+		lineageTag: 99b5520a-7987-4938-8670-176da13ec652
+		summarizeBy: sum
+		sourceColumn: AgeDays
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column OverdueFlag
+		dataType: int64
+		formatString: 0
+		lineageTag: 4fa5b22d-d82a-4446-9747-4f55fca7093f
+		summarizeBy: sum
+		sourceColumn: OverdueFlag
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column FilingCertificationStatus
+		dataType: string
+		lineageTag: d8fb726c-af70-4066-b2e3-e0abd82b6b29
+		summarizeBy: none
+		sourceColumn: FilingCertificationStatus
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Exception Register' = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Database("paige.database.windows.net", "MortgageGovernance"),
+				    pbi_vw_McrExceptionRegister = Source{[Schema="pbi",Item="vw_McrExceptionRegister"]}[Data]
+				in
+				    pbi_vw_McrExceptionRegister
+
+	annotation PBI_NavigationStepName = Navigation
+
+	annotation PBI_ResultType = Table
+

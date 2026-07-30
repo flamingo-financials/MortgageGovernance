@@ -1,0 +1,23 @@
+model Model
+	culture: en-US
+	defaultPowerBIDataSourceVersion: powerBI_V3
+	sourceQueryCulture: en-US
+	valueFilterBehavior: independent
+	dataAccessOptions
+		legacyRedirects
+		returnErrorValuesAsNull
+
+annotation __PBI_TimeIntelligenceEnabled = 0
+
+annotation PBI_QueryOrder = ["Filing Tie-Out","Coverage Summary","Exception Register","Data Product","_Measures"]
+
+annotation PBI_ProTooling = ["DevMode"]
+
+ref table 'Filing Tie-Out'
+ref table 'Coverage Summary'
+ref table 'Exception Register'
+ref table 'Data Product'
+ref table _Measures
+
+ref cultureInfo en-US
+

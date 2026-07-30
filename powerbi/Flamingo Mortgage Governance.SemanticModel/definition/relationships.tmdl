@@ -1,0 +1,8 @@
+relationship AutoDetected_15ddb4ca-172e-4c0a-a18c-02098a9e4538
+	fromColumn: 'Filing Tie-Out'.FilingCertificationStatus
+	toColumn: 'Data Product'.FilingCertificationStatus
+
+relationship AutoDetected_53f17845-c468-4dd9-91cc-56e42786593c
+	fromColumn: 'Exception Register'.FilingCertificationStatus
+	toColumn: 'Data Product'.FilingCertificationStatus
+

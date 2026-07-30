@@ -1,0 +1,203 @@
+/// Certified view pbi.vw_McrFilingTieOut. One row per MCR FV7 line item and measure type for a governed filing. Governance-computed value, filed value, signed variance and the registered derivation rule that produced it.
+table 'Filing Tie-Out'
+	lineageTag: 6632a029-cb63-4975-b046-fea7425543b1
+
+	column FilingId
+		dataType: int64
+		formatString: 0
+		lineageTag: a4533366-176e-4dc7-ae7e-ba59d15ff39c
+		summarizeBy: count
+		sourceColumn: FilingId
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column PeriodEndDate
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: a2af0860-d6a2-4411-9b38-e524b5cced4d
+		summarizeBy: none
+		sourceColumn: PeriodEndDate
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column ItemCode
+		dataType: string
+		lineageTag: df0db4a4-c6a1-44f5-b9e4-219fcff9c631
+		summarizeBy: none
+		sourceColumn: ItemCode
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column ItemLabel
+		dataType: string
+		lineageTag: 2088b7ae-f668-4c73-a6eb-d181400e6784
+		summarizeBy: none
+		sourceColumn: ItemLabel
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column ElementName
+		dataType: string
+		lineageTag: f91bdcb5-88c8-4e56-b1a9-7c67a0fb3c7c
+		summarizeBy: none
+		sourceColumn: ElementName
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column MeasureTypeCode
+		dataType: string
+		lineageTag: 8491cb45-4a23-4942-9862-da0212b7782a
+		summarizeBy: none
+		sourceColumn: MeasureTypeCode
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column GovernanceValue
+		dataType: double
+		lineageTag: eb28a647-7078-47a7-b399-fdb0e5e1af55
+		summarizeBy: sum
+		sourceColumn: GovernanceValue
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column GovernanceValueFiledBasis
+		dataType: double
+		lineageTag: 9432f760-de2c-480f-8b4e-02282ac6c9b5
+		summarizeBy: sum
+		sourceColumn: GovernanceValueFiledBasis
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column FiledValue
+		dataType: double
+		lineageTag: 46fb37a9-4dcc-4b32-b2a8-3c2e39edb458
+		summarizeBy: sum
+		sourceColumn: FiledValue
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column Variance
+		dataType: double
+		lineageTag: f0e7a64b-665f-492a-b129-137416f572ba
+		summarizeBy: sum
+		sourceColumn: Variance
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column RoundingEffect
+		dataType: double
+		lineageTag: b402bee7-183e-41ba-b103-5e746c0e1cdb
+		summarizeBy: sum
+		sourceColumn: RoundingEffect
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column TieOutStatus
+		dataType: string
+		lineageTag: 5ca51141-2860-40c9-87c8-54586afac4c0
+		summarizeBy: none
+		sourceColumn: TieOutStatus
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column NmlsDerivedFlag
+		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: c61c4330-94cf-4bc0-9094-b074c35ec5d1
+		summarizeBy: none
+		sourceColumn: NmlsDerivedFlag
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column DerivationRuleCode
+		dataType: string
+		lineageTag: 784a077e-47f5-4147-a40c-eba37b380c78
+		summarizeBy: none
+		sourceColumn: DerivationRuleCode
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column DerivationRuleName
+		dataType: string
+		lineageTag: 012cc2a2-079d-4610-9555-0347a8326f8b
+		summarizeBy: none
+		sourceColumn: DerivationRuleName
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column PopulationRowCount
+		dataType: int64
+		formatString: 0
+		lineageTag: 0d1966a2-33f0-4db9-920e-338a9bcef882
+		summarizeBy: sum
+		sourceColumn: PopulationRowCount
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	column FilingCertificationStatus
+		dataType: string
+		lineageTag: 86b2dce6-2aba-43ab-ac2d-92c943a965cc
+		summarizeBy: none
+		sourceColumn: FilingCertificationStatus
+
+		changedProperty = IsHidden
+
+		annotation SummarizationSetBy = Automatic
+
+	partition 'Filing Tie-Out' = m
+		mode: import
+		source =
+				let
+				    Source = Sql.Database("paige.database.windows.net", "MortgageGovernance"),
+				    pbi_vw_McrFilingTieOut = Source{[Schema="pbi",Item="vw_McrFilingTieOut"]}[Data]
+				in
+				    pbi_vw_McrFilingTieOut
+
+	annotation PBI_NavigationStepName = Navigation
+
+	annotation PBI_ResultType = Table
+
