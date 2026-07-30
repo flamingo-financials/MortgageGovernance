@@ -1,0 +1,543 @@
+**MCR FV7 Toolkit - Stored Procedure Runbook**
+
+*Copy-paste execution examples, in run order*
+
+Document version 1.3 - July 2026
+
+Companion to MCR_FV7_Master_SOP.docx (Phase 4)
+
+# **1. Procedure Inventory**
+
+Twenty procedures (fifteen core plus five in the optional MBFRF layer). In normal quarterly operation you call three or four of them (sections 2-4); the rest are for troubleshooting, verification, and coverage testing. All examples assume USE MCR_Toolkit; and use FilingId 2026002 (Q2 2026) with prior filing 2026001.
+
+| **Procedure** | **Script** | **Purpose** | **Normal use** |
+| --- | --- | --- | --- |
+| mcr.usp_CreateFiling | 07 | Register a filing period (validated insert into mcr.Filing) | Quarterly, step 1 |
+| mcr.usp_RunAndArchiveFiling | 08 | Full pipeline (load, validate, variance, generate) + immutable archive of the XML AND the element-level data behind it, one call | Quarterly, step 3 |
+| mcr.usp_RecordSubmission | 08 | Stamp submitted date and NMLS confirmation on the archive row | Quarterly, step 4 |
+| mcr.usp_VerifyFilingArchive | 08 | Re-hash archived filings; prove integrity | Quarter-end control |
+| mcr.usp_RunFilingPipeline | 07 | The pipeline without archiving | Iterating on a draft |
+| mcr.usp_LoadReportValues | 03 | Load stage only | Troubleshooting |
+| mcr.usp_ValidateFiling | 04 | Validate stage only | Troubleshooting |
+| mcr.usp_QaVariance | 06 | Variance stage only | Troubleshooting |
+| mcr.usp_GenerateMcrXml | 05 | Generate stage only | Troubleshooting |
+| mcr.usp_ExportArchivedFiling | 08 | Re-emit the exact archived XML, integrity-verified | On demand |
+| mcr.usp_RestoreFilingData | 08 | Rehydrate staging with an archive's exact data | Amendments |
+| mcr.usp_CompareArchives | 08 | Element-level diff between two archives | Amendment audit |
+| mcr.usp_ArchiveFiling | 08 | Archive step only (hash + immutable snapshot); called by usp_RunAndArchiveFiling | Internal / rare direct use |
+| mcr.usp_StageFullCoverageDemo | 07 | Stage every catalog element; schema-coverage proof | After upgrades |
+| mcr.usp_ReconcileHmda | 14 | HMDA LAR vs MCR reconciliation per state (rule 12); WARNING-only, tolerance-based, checks defined in mcr.HmdaMcrBridge | Automatic in pipeline stage 3a (HMDA reporters); standalone for reruns |
+| mcr.usp_LoadMbfrfFromSource | 15 | Derives MBFRF production/servicing/repurchase fields from the dbo staging tables; manual GL fields entered directly into mcr.MbfrfValues | Quarterly, before the pipeline (agency seller/servicers) |
+| mcr.usp_ValidateMbfrf | 15 | MBFRF internal checks (rule 13) + MCR reconciliation (rule 14); WARNING-only findings in mcr.ValidationResults | Automatic in pipeline stage 3b; standalone for reruns |
+| mcr.usp_GetMbfrfKeyingPackage | 15 | Ordered WebMB entry grid, KeyAs in rounded $000s; REFUSES while rule 13 failures exist | Quarterly, after a clean stage 3b |
+| mcr.usp_ArchiveMbfrf | 15 | Freezes the keyed values append-only with a SHA-256 hash; refuses on rule 13 failures | Quarterly, after WebMB submission |
+| mcr.usp_VerifyMbfrfArchive | 15 | Recomputes and compares each MBFRF archive hash | Quarter-end integrity control, with usp_VerifyFilingArchive |
+
+**NOTE: **Execution order matters only at the stage level: a filing must exist before anything else, staging must be populated before load makes sense, validation must run before generation (05 reads mcr.ValidationResults for its error gate). usp_RunAndArchiveFiling sequences all of it for you - prefer it.
+
+**NOTE: **v1.3: the toolkit also ships 11_pbi_views.sql (Power BI semantic layer), 12_demo_data_cmg.sql (fictional demo dataset), 13_pbi_measures.tmdl (Power BI measures), 14_hmda_recon.sql (HMDA reconciliation, rule 12), and 15_mbfrf_layer.sql (MBFRF layer, rules 13/14). Section 6 covers deployment and operation of all five.
+
+# **2. Standard Quarterly Sequence**
+
+## **Step 1 - Register the filing (usp_CreateFiling)**
+
+USE MCR_Toolkit;
+
+GO
+
+EXEC mcr.usp_CreateFiling
+
+     @FilingId         = 2026002,        -- unique; YYYYQ0N convention
+
+     @CompanyNmlsId    = 1820999,        -- your company NMLS ID
+
+     @CompanyName      = 'Fictional Mortgage Co',
+
+     @Year             = 2026,
+
+     @PeriodType       = 'MCRQ2',        -- MCRQ1..MCRQ4, MCRANNUAL
+
+     @PeriodStart      = '2026-04-01',
+
+     @PeriodEnd        = '2026-06-30',
+
+     @PrimaryStateCode = 'OK',
+
+     @PriorFilingId    = 2026001;        -- NULL if no prior (variance skipped)
+
+Optional parameters and defaults: @FilerType = 'E', @FormVersion = 'v7'.
+
+**Expected output:**
+
+Filing 2026002 created (MCRQ2 2026, v7).
+
+Errors it raises for you: duplicate FilingId, nonexistent @PriorFilingId, @PeriodEnd not after @PeriodStart.
+
+## **Step 2 - Populate staging (your Phase 2 layer, not a toolkit proc)**
+
+Run your load job (Pattern A) or confirm your views return rows (Pattern B) for FilingId 2026002, then run the unmapped-value check from SOP 4.3 and require zero rows. Add any manual FC / not-loaded INSERTs now.
+
+## **Step 3 - Run the pipeline and archive (usp_RunAndArchiveFiling)**
+
+DECLARE @ArchiveId INT;
+
+EXEC mcr.usp_RunAndArchiveFiling
+
+     @FilingId     = 2026002,
+
+     @BlockOnError = 1,      -- never 0 for a real submission
+
+     @RunVariance  = 1,
+
+     @Reload       = 1,      -- see note below
+
+     @Notes        = N'Q2 2026 production run',
+
+     @ArchiveId    = @ArchiveId OUTPUT;
+
+ 
+
+SELECT @ArchiveId AS ArchiveId;   -- record in the Filing_Log
+
+**Expected output - stage prints, three to six result grids, archive confirmation:**
+
+=== Stage 1: staging prior filing 2026001 ===   (only if not already staged)
+
+=== Stage 2: load ===
+
+Loaded filing 2026002: NNN element values, NN repeating-list values.
+
+=== Stage 3: validate ===
+
+  [result grid: mcr.ValidationResults rows - must show 0 ERROR rows]
+
+=== Stage 3a: HMDA reconciliation (rule 12) ===   (only if 14 deployed)
+
+  [result grid: PASS/WARN per state and check; WARNINGs written as
+
+   RuleType HMDA_RECON]
+
+=== Stage 3b: MBFRF checks (rules 13/14) ===   (only if 15 deployed)
+
+  [two result grids: internal checks PASS/FAIL; MCR reconciliation
+
+   PASS/WARN. Findings written as MBFRF_CHECK / MBFRF_RECON]
+
+=== Stage 4: variance ===
+
+  [result grid: element-level QoQ variance vs 2026001]
+
+=== Stage 5: generate ===
+
+  [result grid: McrFilingXml (typed) and McrFilingText (save this one)]
+
+=== Done: NNNNN characters of XML. Save McrFilingText as .xml (UTF-8)
+
+    and schema-validate before upload. ===
+
+Archived filing 2026002 as archive 12 (NNNNN chars, 0 errors, N warnings).
+
+**NOTE: **@Reload = 1 wipes and re-stages mcr.ReportValues / mcr.RepeatingValues for the filing. If you added manual FC or not-loaded entries and need to rerun, call with @Reload = 0 or they are destroyed. If validation ERRORs exist, stage 5 is blocked, no XML is produced, and nothing is archived - fix the data and rerun. Every successful rerun creates a NEW archive row; the last one before upload is the one you submit and stamp.
+
+Save the McrFilingText result as MCR_2026_MCRQ2.xml (UTF-8) and schema-validate per SOP 3.3 / 6.6. Then refresh the Power BI review model (section 6.3) before the variance and controls review.
+
+## **Step 3a - HMDA reconciliation (automatic in the pipeline; standalone for reruns)**
+
+Once 14 is deployed, the pipeline runs this automatically as stage 3a - after validate and before the archive snapshot, so findings are in the immutable archive record. Stage dbo.HmdaLar for the period BEFORE running the pipeline. Run the proc standalone only to rerun after restaging the LAR - always AFTER usp_ValidateFiling, never before (validate deletes every validation row for the filing, including these).
+
+EXEC mcr.usp_ReconcileHmda @FilingId = 2026002;
+
+**Expected output - a PASS/WARN grid per state and check, plus:**
+
+HMDA reconciliation filing 2026002: N finding(s) written as WARNING
+
+    (rule 12, HMDA_RECON).
+
+**NOTE: **Findings are WARNINGs only and never block generation; each gets the standard disposition on the Validation_Exceptions tab. The checks compare funded channels only - brokered-out loans are on the funding lender's LAR, not yours - and carry tolerances for the documented definitional differences (mcr.HmdaMcrBridge holds the checks, tolerances, and exclusions; compliance owns changes to it). If no LAR rows are staged for the filing, the proc prints a skip message and exits. An unexplained breach means one of the two filings is wrong - investigate before submitting either.
+
+## **Step 3b - MBFRF checks and keying package (if the MBFRF layer is deployed)**
+
+Stage before the pipeline; the pipeline runs rules 13/14 as stage 3b:
+
+EXEC mcr.usp_LoadMbfrfFromSource @FilingId = 2026002;
+
+-- plus manual INSERTs into mcr.MbfrfValues (whole dollars) for the
+
+-- balance-sheet and income fields, per the GL close
+
+After a clean run (no MBFRF_CHECK findings):
+
+EXEC mcr.usp_GetMbfrfKeyingPackage @FilingId = 2026002;
+
+-- key the KeyAs column into WebMB in grid order ($000s);
+
+-- CEO/CFO certification at submission
+
+EXEC mcr.usp_ArchiveMbfrf @FilingId = 2026002,
+
+     @Notes = N'Q2 2026 WebMB submission';
+
+EXEC mcr.usp_VerifyMbfrfArchive;
+
+**NOTE: **Rule 13 failures hard-gate the keying package and the MBFRF archive but never block MCR XML generation - the MCR error gate reads only ERROR severity and MBFRF findings are WARNINGs. Rerun usp_ValidateMbfrf standalone after restaging values - always AFTER usp_ValidateFiling, which wipes the filing's validation rows. Disposition rule 14 WARNINGs on the Validation_Exceptions tab.
+
+## **Step 4 - After NMLS upload (usp_RecordSubmission)**
+
+EXEC mcr.usp_RecordSubmission
+
+     @ArchiveId        = 12,              -- from step 3
+
+     @SubmittedDate    = '2026-08-10',
+
+     @NmlsConfirmation = 'NMLS-12345678';
+
+**Expected output:**
+
+Archive 12 marked submitted 2026-08-10, confirmation NMLS-12345678.
+
+## **Step 5 - Quarter-end integrity control (usp_VerifyFilingArchive)**
+
+EXEC mcr.usp_VerifyFilingArchive;                  -- all archives
+
+EXEC mcr.usp_VerifyFilingArchive @ArchiveId = 12;  -- one archive
+
+Expected output: one grid row per archive with Status = VERIFIED. Any row showing INTEGRITY FAILURE means the archived text no longer matches its hash - escalate immediately; do not export or rely on that row. File the VERIFIED output with the governance log.
+
+# **3. Stage-by-Stage Execution (Troubleshooting)**
+
+When a pipeline run fails or you want to inspect one stage's output in isolation, run the underlying procedures directly - in this order, because each stage reads the previous stage's tables.
+
+## **3.1 Load only (usp_LoadReportValues)**
+
+EXEC mcr.usp_LoadReportValues @FilingId = 2026002;
+
+ 
+
+-- inspect what was staged:
+
+SELECT ScopeKey, COUNT(*) AS Elements
+
+FROM mcr.ReportValues
+
+WHERE FilingId = 2026002
+
+GROUP BY ScopeKey
+
+ORDER BY ScopeKey;
+
+**NOTE: **The proc deletes and re-stages the filing's rows every call. Manual entries added after a load call survive only until the next load call.
+
+## **3.2 Validate only (usp_ValidateFiling)**
+
+EXEC mcr.usp_ValidateFiling @FilingId = 2026002;
+
+ 
+
+-- re-query anytime (rewritten on every validate call):
+
+SELECT Severity, RuleType, ScopeKey, ItemCode, Detail
+
+FROM mcr.ValidationResults
+
+WHERE FilingId = 2026002
+
+ORDER BY CASE Severity WHEN 'ERROR' THEN 0 ELSE 1 END, RuleType;
+
+## **3.3 Variance only (usp_QaVariance)**
+
+EXEC mcr.usp_QaVariance @FilingId = 2026002;
+
+ 
+
+-- requires mcr.Filing.PriorFilingId set and the prior filing staged;
+
+-- if the prior was never staged, run:
+
+--   EXEC mcr.usp_LoadReportValues @FilingId = 2026001;
+
+## **3.4 Generate only (usp_GenerateMcrXml)**
+
+DECLARE @Xml NVARCHAR(MAX);
+
+EXEC mcr.usp_GenerateMcrXml
+
+     @FilingId     = 2026002,
+
+     @BlockOnError = 1,
+
+     @Xml          = @Xml OUTPUT;
+
+ 
+
+SELECT N'<?xml version="1.0" encoding="utf-8"?>' + @Xml AS McrFilingText;
+
+**NOTE: **Run usp_ValidateFiling first: the error gate reads mcr.ValidationResults, so generating against stale validation results defeats the gate. @BlockOnError = 0 exists for inspecting draft XML with known errors - never for a submission, and note that generating directly here bypasses archiving; archive manually (3.5) if the output matters.
+
+## **3.5 Archive manually (usp_ArchiveFiling)**
+
+DECLARE @Xml NVARCHAR(MAX), @ArchiveId INT;
+
+EXEC mcr.usp_GenerateMcrXml @FilingId = 2026002,
+
+     @BlockOnError = 1, @Xml = @Xml OUTPUT;
+
+ 
+
+EXEC mcr.usp_ArchiveFiling
+
+     @FilingId  = 2026002,
+
+     @Xml       = @Xml,        -- generator output, no prolog
+
+     @Notes     = N'Manual archive after stage-by-stage run',
+
+     @ArchiveId = @ArchiveId OUTPUT;
+
+The proc prepends the prolog itself, snapshots mcr.ValidationResults into mcr.ValidationResultsHistory, and computes the SHA-256 hash. Pass the raw generator output; do not prepend the prolog yourself.
+
+# **4. Utility Procedures**
+
+## **4.1 Reproduce a submitted filing (usp_ExportArchivedFiling)**
+
+EXEC mcr.usp_ExportArchivedFiling @ArchiveId = 12;
+
+Verifies the hash first (refuses to export on failure), then returns McrFilingText - save as UTF-8 .xml. This reproduces the exact submitted file at any point in the future.
+
+**Finding the right ArchiveId:**
+
+SELECT ArchiveId, FilingId, [Year], PeriodType, ArchivedUtc,
+
+       SubmittedDate, NmlsConfirmation, ErrorCount, WarningCount
+
+FROM mcr.FilingArchive
+
+ORDER BY ArchiveId DESC;
+
+## **4.2 Pipeline without archiving (usp_RunFilingPipeline)**
+
+DECLARE @Xml NVARCHAR(MAX);
+
+EXEC mcr.usp_RunFilingPipeline
+
+     @FilingId     = 2026002,
+
+     @BlockOnError = 1,
+
+     @RunVariance  = 0,      -- often off while iterating
+
+     @Reload       = 1,
+
+     @Xml          = @Xml OUTPUT;
+
+Use while iterating on data fixes mid-quarter to avoid cluttering the archive with drafts. Switch back to usp_RunAndArchiveFiling for the run you intend to submit.
+
+## **4.3 Schema-coverage proof (usp_StageFullCoverageDemo)**
+
+EXEC mcr.usp_StageFullCoverageDemo
+
+     @FilingId  = 9999,      -- default (reserved demo ID); creates it if absent
+
+     @StateCode = 'OK';      -- default
+
+Stages a demo value into every submittable element and one row per repeating list, then generates with the error gate off (uniform demo values fail the reconciliation rules by design - that is expected). Save the output and schema-validate it against the XSD. Run after any catalog regeneration or generator change. This is a coverage proof, never a filing path.
+
+## **4.4 Amend or append after submission (usp_RestoreFilingData + usp_CompareArchives)**
+
+Every archive freezes the element-level data, not just the XML - so an amended or appended report starts from exactly what was submitted, even if staging has since been reloaded or wiped.
+
+-- 1. Rehydrate staging with the submitted archive's exact data
+
+EXEC mcr.usp_RestoreFilingData @ArchiveId = 12;
+
+ 
+
+-- 2. Apply the amendment against the restored staging rows, e.g.
+
+--    append a previously omitted element:
+
+INSERT INTO mcr.ReportValues
+
+    (FilingId, ScopeKey, ElementName, NumValue)
+
+VALUES (2026002, 'OK', 'AC1000_1', 180000);
+
+ 
+
+--    or correct a value:
+
+UPDATE mcr.ReportValues
+
+   SET NumValue = 265000
+
+ WHERE FilingId = 2026002 AND ScopeKey = 'OK'
+
+   AND ElementName = 'AC1000_1';
+
+ 
+
+-- 3. Revalidate, regenerate, archive as a NEW row.
+
+--    @Reload = 0 is critical: 1 would overwrite the restored data
+
+--    with a fresh load from source.
+
+DECLARE @ArchiveId2 INT;
+
+EXEC mcr.usp_RunAndArchiveFiling
+
+     @FilingId  = 2026002,
+
+     @Reload    = 0,
+
+     @Notes     = N'Amended: corrected OK AC1000 per NMLS inquiry',
+
+     @ArchiveId = @ArchiveId2 OUTPUT;
+
+ 
+
+-- 4. Audit trail: exactly what changed vs the submitted version
+
+EXEC mcr.usp_CompareArchives
+
+     @ArchiveIdA = 12,           -- original submission
+
+     @ArchiveIdB = @ArchiveId2;  -- amendment
+
+usp_CompareArchives returns ADDED / REMOVED / CHANGED rows with old and new values for both scalar elements and list rows - file it with the amendment's Change_Log entry. The original submission's archive row is untouched throughout; after uploading the amendment, stamp the new row with usp_RecordSubmission.
+
+**NOTE: **Restore requires the catalog (02) matching the archive's form version. Amending a filing from a prior form version after an upgrade means restoring in an environment still on that version's catalog - the archived data itself is always readable regardless.
+
+# **5. Parameter Quick Reference**
+
+| **Parameter** | **Used by** | **Values / meaning** |
+| --- | --- | --- |
+| @FilingId | All | The filing being operated on. Must exist in mcr.Filing (usp_CreateFiling first). |
+| @BlockOnError | RunAndArchive, RunFilingPipeline, GenerateMcrXml | 1 (default): refuse to generate with open validation ERRORs. Always 1 for submissions. |
+| @RunVariance | RunAndArchive, RunFilingPipeline | 1 (default): run QoQ variance. Requires PriorFilingId; harmlessly skippable while iterating. |
+| @Reload | RunAndArchive, RunFilingPipeline | 1 (default): wipe and re-stage from source. 0: keep existing staging - required after manual FC / not-loaded entries. |
+| @Xml OUTPUT | RunFilingPipeline, GenerateMcrXml | Generator output without prolog. The result grids also return McrFilingText with the prolog prepended - save that one. |
+| @ArchiveId | RunAndArchive (OUTPUT), ArchiveFiling (OUTPUT), RecordSubmission, VerifyFilingArchive, ExportArchivedFiling, RestoreFilingData, CompareArchives | Identity of the archive row. Record it in the Filing_Log at generation time. |
+| @PeriodType | CreateFiling | MCRQ1, MCRQ2, MCRQ3, MCRQ4, MCRANNUAL. |
+| @FormVersion | CreateFiling | Defaults to 'v7'. Only change during a form-version upgrade (SOP Phase 5). |
+
+## **Common failure messages**
+
+| **Message** | **Meaning / action** |
+| --- | --- |
+| Filing N already exists. | Duplicate @FilingId on usp_CreateFiling. Pick the next ID. |
+| Filing N not found. Call mcr.usp_CreateFiling first. | Pipeline run before registration - do step 1. |
+| PriorFilingId N does not exist. | Register or correct the prior filing reference. |
+| Filing N has validation ERROR(s). Fix them or call with @BlockOnError = 0. | Query mcr.ValidationResults, fix data/mappings, rerun. Do not use the override for a submission. |
+| === Stage 5: generation BLOCKED - N validation ERROR(s). === | Same as above; the pipeline stopped before generate. |
+| No XML produced ... nothing archived. | usp_RunAndArchiveFiling: the pipeline blocked or failed; there is nothing to archive. Resolve the underlying stage. |
+| Nothing to archive: @Xml is empty for filing N. | usp_ArchiveFiling called without generator output. |
+| Archive N failed integrity verification or does not exist. | usp_ExportArchivedFiling refused a corrupted/missing row. Run usp_VerifyFilingArchive and escalate. |
+| mcr.FilingArchive is append-only. Rows are never deleted. | By design. Corrections are new archive rows. |
+| mcr.ReportValuesHistory / RepeatingValuesHistory / ValidationResultsHistory is append-only. | By design. Archived data is never edited; amend via usp_RestoreFilingData and a new archive. |
+| Filing N has MBFRF internal check failures (rule 13)... before keying. | usp_GetMbfrfKeyingPackage refused: fix the staged mcr.MbfrfValues and rerun usp_ValidateMbfrf. |
+| Filing N has MBFRF internal check failures (rule 13); archive refused. | usp_ArchiveMbfrf refused for the same reason. Clean rule 13 first. |
+| mcr.MbfrfArchive / MbfrfValuesHistory is append-only. | By design. Corrections are new MBFRF archive rows. |
+
+# **6. Power BI Layer, HMDA and MBFRF Layers, and Demo Dataset**
+
+Files 11-15 add a business review layer and two cross-filing controls on top of the toolkit. They change nothing in scripts 01-10; 11 is read-only, 14 adds one staging table, one config table, and one WARNING-only procedure, and 15 adds the MBFRF staging/config tables, five procedures, and its own append-only archive.
+
+## **6.1 Deploy the semantic layer (11_pbi_views.sql)**
+
+Run once per deployment, any time after 01 and 02. Idempotent (CREATE OR ALTER).
+
+-- SSMS: open and execute 11_pbi_views.sql
+
+-- Expected completion print:
+
+-- 11 complete: pbi.* views created (import all into Power BI).
+
+Creates the pbi schema and the star-schema views: DimFiling, DimField, DimScope, FactReportValues, FactVariance, FactValidation, FactMloProduction, FactClosedLoans, FactServicing (plus FactHmdaRecon from 14 and FactMbfrf from 15). Column dictionary and the model relationship map: MCR_Data_Dictionary.xlsx, PBI_Views tab.
+
+## **6.1a Deploy the HMDA layer (14_hmda_recon.sql, optional)**
+
+Run once per deployment if the company is a HMDA reporter; idempotent. Install BEFORE running 12 so the demo stages LAR rows.
+
+-- SSMS: open and execute 14_hmda_recon.sql
+
+-- Expected completion print:
+
+-- 14 complete: dbo.HmdaLar, mcr.HmdaMcrBridge,
+
+--     mcr.usp_ReconcileHmda, pbi.FactHmdaRecon created.
+
+## **6.1b Deploy the MBFRF layer (15_mbfrf_layer.sql, optional)**
+
+Run once per deployment if the company is an agency seller/servicer; idempotent. Install BEFORE running 12 so the demo stages MBFRF values. The mcr.MbfrfCatalog seed is a representative subset - compliance completes and verifies field codes against the current WebMB definitions before production use.
+
+-- SSMS: open and execute 15_mbfrf_layer.sql
+
+-- Expected completion print:
+
+-- 15 complete: mcr.MbfrfCatalog/Values/Check, mcr.McrMbfrfBridge,
+
+--     usp_LoadMbfrfFromSource, usp_ValidateMbfrf,
+
+--     usp_GetMbfrfKeyingPackage, usp_ArchiveMbfrf,
+
+--     usp_VerifyMbfrfArchive, pbi.FactMbfrf created.
+
+## **6.2 Build (or rebuild) the demo dataset (12_demo_data_cmg.sql)**
+
+Optional. Fictional 'CMG Financial (Fictional Demo)' company (fake NMLS ID 9990001), 5 states (CA, TX, OK, GA, NY), 10 MLOs (9900001-9900010), two quarters. Uses the reserved 9000-9999 test range: 9210 = Q4 2025 prior, 9211 = Q1 2026 current. Deterministic - every rebuild produces identical numbers. Safe to re-run; it deletes and regenerates its own filings only.
+
+-- SSMS: open and execute 12_demo_data_cmg.sql
+
+-- The script ends by running the pipeline itself:
+
+--   EXEC mcr.usp_RunFilingPipeline @FilingId = 9211, @BlockOnError = 1 ...
+
+-- Expected: 0 validation ERRORs; XML generated; GA flagged in variance
+
+-- (its volume is +55% QoQ by design, to exercise the FLAG path).
+
+-- If 14 is installed, the script stages a matching HMDA LAR before the
+
+-- pipeline, so stage 3a runs rule 12 for 9211 (and the script runs it
+
+-- explicitly for prior filing 9210, which never pipelines):
+
+-- TX WARNs on HMDA01 (8% > 5% tolerance) and HMDA04 (~5.9%) from two
+
+-- injected drift rows; HMDA02 stays inside its 10% amount tolerance;
+
+-- all other states/checks PASS.
+
+-- If 15 is installed, the script also stages MBFRF values (loader +
+
+-- tying manual entries) before the pipeline, so stage 3b runs rules
+
+-- 13/14 for 9211 and the script runs them for 9210: expected all
+
+-- PASS on both grids (the MBFRF layer demos the clean path; HMDA
+
+-- demos the WARNING path.
+
+**NOTE: **The demo passes validation clean by construction: closed loans are generated 1:1 from ClosedFunded applications with NoteAmount = AppAmount, so the QM cross-foot (rule 5) and MLO reconciliation (rule 7) tie exactly, and the servicing partitions (rules 8-10) derive from the same rows. Never reuse the demo FilingIds or the fictional NMLS ID for real work.
+
+## **6.3 Power BI model setup and quarterly refresh**
+
+- One time: in Power BI Desktop, Get Data > SQL Server > MCR_Toolkit, select all nine pbi.* views from 11 (plus pbi.FactHmdaRecon if 14 is deployed and pbi.FactMbfrf if 15 is deployed), Import mode.
+
+- Create the relationships per the PBI_Views tab of the data dictionary (DimFiling to every fact on FilingId; DimScope to the element facts on ScopeKey and to the loan-grain facts on StateCode; DimField to FactReportValues and FactVariance on ItemCode; leave FactValidation unrelated to DimField). FactHmdaRecon relates to DimFiling on FilingId and DimScope on StateCode; FactMbfrf relates to DimFiling on FilingId; add both to the Controls page.
+
+- Paste the Measures table from 13_pbi_measures.tmdl into the model's TMDL view (or recreate the 25 measures manually). All math is measures; no calculated columns.
+
+- Quarterly: after every pipeline run, refresh the dataset, then review the Variance and Controls pages before dispositioning WARNINGs (SOP 6.4-6.5).
+
+Suggested pages: 1 Filing Overview (status card, closed volume, state map), 2 Variance Review, 3 Controls (validation grid), 4 MLO Production, 5 Servicing.
+
+# **7. Record of Changes**
+
+| **Version** | **Date** | **Change** |
+| --- | --- | --- |
+| 1.0 | July 2026 | Initial issue. |
+| 1.1 | July 2026 | Added section 6: Power BI semantic layer (11_pbi_views.sql), demo dataset (12_demo_data_cmg.sql), TMDL measures (13_pbi_measures.tmdl). Step 3 now points to the PBI refresh before variance review. No procedure changes. |
+| 1.2 | July 2026 | Added the HMDA layer (14_hmda_recon.sql): usp_ReconcileHmda joins the inventory, step 3a documented, section 6.1a added. |
+| 1.3 | July 2026 | Rules 12-14 run inside the pipeline (stages 3a/3b) so findings are captured in the archive snapshot; steps 3a/3b rewritten accordingly. Added the MBFRF layer (15_mbfrf_layer.sql): five procedures, section 6.1b, failure messages, and PBI import wording covering FactHmdaRecon and FactMbfrf. |
+| 1.2 | July 2026 | Added mcr.usp_ReconcileHmda (14_hmda_recon.sql): inventory row, quarterly step 3a with execution-order rule (always after the pipeline), 6.1a deploy step, and demo expected output (TX HMDA01/HMDA04 WARNINGs). Fifteen procedures total. |

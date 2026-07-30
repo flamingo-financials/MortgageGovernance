@@ -1,0 +1,173 @@
+/// MCR FV7 TOOLKIT - Power BI measures (TMDL)
+/// ---------------------------------------------------------------------
+/// Model tables = the pbi.* views from 11_pbi_views.sql, imported as:
+///   DimFiling, DimField, DimScope, FactReportValues, FactVariance,
+///   FactValidation, FactMloProduction, FactClosedLoans, FactServicing
+///   (plus FactHmdaRecon from 14 - relate to DimFiling[FilingId] and
+///   DimScope[StateCode] - and FactMbfrf from 15 - relate to
+///   DimFiling[FilingId]; both live on the Controls page)
+/// Relationships (single direction, dims filter facts):
+///   DimFiling[FilingId]  1:* all facts [FilingId]
+///   DimScope[ScopeKey]   1:* FactReportValues/FactVariance/
+///                            FactValidation [ScopeKey]
+///   DimScope[ScopeKey]   1:* FactClosedLoans/FactServicing/
+///                            FactMloProduction [StateCode]
+///   DimField[ItemCode]   1:* FactReportValues/FactVariance [ItemCode]
+/// Suggested report pages:
+///   1 Filing Overview   status card, closed volume, state map
+///   2 Variance Review   FactVariance matrix, Flag slicer, PctChange bars
+///   3 Controls          FactValidation table, error/warning cards
+///   4 MLO Production    FactMloProduction bar + drill to FactClosedLoans
+///   5 Servicing         ownership/delinquency/investor breakdowns
+
+table Measures
+
+	/// ---- staged report values (element grain) ----
+
+	measure 'Reported Amount ($)' =
+			CALCULATE (
+			    SUM ( FactReportValues[NumValue] ),
+			    FactReportValues[Kind] = "AMOUNT"
+			)
+		formatString: \$#,0
+
+	measure 'Reported Count (#)' =
+			CALCULATE (
+			    SUM ( FactReportValues[NumValue] ),
+			    FactReportValues[Kind] = "COUNT"
+			)
+		formatString: #,0
+
+	/// ---- quarter-over-quarter variance ----
+
+	measure 'Current Value' = SUM ( FactVariance[CurrentVal] )
+		formatString: #,0
+
+	measure 'Prior Value' = SUM ( FactVariance[PriorVal] )
+		formatString: #,0
+
+	measure 'Variance' = SUM ( FactVariance[VarianceVal] )
+		formatString: #,0
+
+	measure 'Variance %' =
+			DIVIDE (
+			    SUM ( FactVariance[VarianceVal] ),
+			    ABS ( SUM ( FactVariance[PriorVal] ) )
+			)
+		formatString: +0.0%;-0.0%;0.0%
+
+	measure 'Flagged Items' =
+			CALCULATE (
+			    COUNTROWS ( FactVariance ),
+			    FactVariance[Flag] IN { "FLAG", "NEW", "DROPPED" }
+			)
+		formatString: #,0
+
+	measure 'New Items' =
+			CALCULATE ( COUNTROWS ( FactVariance ),
+			            FactVariance[Flag] = "NEW" )
+		formatString: #,0
+
+	measure 'Dropped Items' =
+			CALCULATE ( COUNTROWS ( FactVariance ),
+			            FactVariance[Flag] = "DROPPED" )
+		formatString: #,0
+
+	/// ---- validation / controls ----
+
+	measure 'Validation Errors' =
+			CALCULATE ( COUNTROWS ( FactValidation ),
+			            FactValidation[Severity] = "ERROR" )
+		formatString: #,0
+
+	measure 'Validation Warnings' =
+			CALCULATE ( COUNTROWS ( FactValidation ),
+			            FactValidation[Severity] = "WARNING" )
+		formatString: #,0
+
+	measure 'Filing Status' =
+			SWITCH (
+			    TRUE (),
+			    [Validation Errors] > 0, "BLOCKED - do not submit",
+			    [Validation Warnings] > 0, "REVIEW - notes required",
+			    "CLEAN"
+			)
+
+	/// ---- closed-loan production (loan grain) ----
+
+	measure 'Closed Volume ($)' = SUM ( FactClosedLoans[NoteAmount] )
+		formatString: \$#,0
+
+	measure 'Closed Loans (#)' = COUNTROWS ( FactClosedLoans )
+		formatString: #,0
+
+	measure 'Avg Loan Size' =
+			DIVIDE ( [Closed Volume ($)], [Closed Loans (#)] )
+		formatString: \$#,0
+
+	measure 'Avg FICO' = AVERAGE ( FactClosedLoans[FicoScore] )
+		formatString: #,0
+
+	measure 'WAC %' =
+			DIVIDE (
+			    SUMX ( FactClosedLoans,
+			           FactClosedLoans[NoteRatePct]
+			               * FactClosedLoans[NoteAmount] ),
+			    SUM ( FactClosedLoans[NoteAmount] )
+			)
+		formatString: 0.000
+
+	measure 'Weighted LTV %' =
+			DIVIDE (
+			    SUMX ( FactClosedLoans,
+			           FactClosedLoans[LtvPct]
+			               * FactClosedLoans[NoteAmount] ),
+			    SUM ( FactClosedLoans[NoteAmount] )
+			)
+		formatString: 0.00
+
+	measure 'QM Share %' =
+			DIVIDE (
+			    CALCULATE ( COUNTROWS ( FactClosedLoans ),
+			                FactClosedLoans[QmStatus] = "QM" ),
+			    [Closed Loans (#)]
+			)
+		formatString: 0.0%
+
+	/// ---- MLO production (list grain) ----
+
+	measure 'MLO Volume ($)' = SUM ( FactMloProduction[Amount] )
+		formatString: \$#,0
+
+	measure 'MLO Loans (#)' = SUM ( FactMloProduction[LoanCount] )
+		formatString: #,0
+
+	/// ---- servicing ----
+
+	measure 'Serviced UPB ($)' = SUM ( FactServicing[UPB] )
+		formatString: \$#,0
+
+	measure 'Serviced Loans (#)' = COUNTROWS ( FactServicing )
+		formatString: #,0
+
+	measure 'Delinquency Rate %' =
+			DIVIDE (
+			    CALCULATE ( SUM ( FactServicing[UPB] ),
+			                FactServicing[IsDelinquent] = 1 ),
+			    SUM ( FactServicing[UPB] )
+			)
+		formatString: 0.00%
+
+	measure 'Foreclosure UPB ($)' =
+			CALCULATE ( SUM ( FactServicing[UPB] ),
+			            FactServicing[InForeclosure] = 1 )
+		formatString: \$#,0
+
+	column Value
+		dataType: string
+		isHidden
+		sourceColumn: Value
+
+	partition Measures = calculated
+		mode: import
+		source = ROW ( "Value", BLANK () )

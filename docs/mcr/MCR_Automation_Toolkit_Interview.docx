@@ -1,0 +1,146 @@
+| **MCR AUTOMATION TOOLKIT** | **CMG ****FINANCIAL** |
+| --- | --- |
+
+| **MCR AUTOMATION** **TOOLKIT** **INTERVIEW QUICK REFERENCE** SQL Server  │  NMLS Mortgage Call Report  │  Validation  │  Auditability |
+| --- |
+
+| **1** | **30-SECOND INTRODUCTION** |
+| --- | --- |
+
+**PROJECT OVERVIEW**
+
+I built a SQL Server toolkit that automates the NMLS Mortgage Call Report from loan-level source data through schema-validated XML ready for NMLS submission.
+
+What makes it different is the control framework. Before output can be generated, the toolkit runs fourteen validation rules, reconciles MCR results to HMDA and the agencies’ quarterly financial report, compares results with the prior quarter, creates a business-readable approval package, and archives each final submission with a digital verification code that confirms the file has not been changed after submission.
+
+The goal was not simply to generate a filing. It was to prove the filing was accurate, reviewed, and unchanged after submission.
+
+|  | **CORE CONTROL** **Errors block the XML from being generated at all.** |
+| --- | --- |
+
+| **2** | **2-MINUTE WALKTHROUGH** |
+| --- | --- |
+
+| **THE PROBLEM** Form Version 7 contains 635 reporting items: 510 submitted by the company and 125 calculated by NMLS. It spans state RMLA, servicing, financial condition, and repeating detail lists, with a 45-day deadline. • Numbers may not reconcile internally. • Reviews may not be documented consistently. • Reproducing the submitted filing during an examination can become a manual reconstruction. | **MY SOLUTION** A Python utility reads the official NMLS schema and generates a SQL Server field catalog. The loader, validator, and XML generator are driven from that catalog. Quarterly processing is one controlled procedure call: register, load, validate, analyze variance, generate, and archive. The catalog, set-based transformation logic, and control rules can be adapted to Snowflake or another database platform. Only platform-specific XML generation would need to be reimplemented. If the schema does not define an element, the toolkit cannot generate it. |
+| --- | --- |
+
+| **3** | **CONTROLS LAYER** |
+| --- | --- |
+
+The primary value is the control framework around the filing process.
+
+| **14 AUTOMATED VALIDATION RULES** Four catalog-driven checks, seven internal reconciliations, one HMDA comparison, and two MBFRF controls. | **HARD GENERATION GATE** Validation errors stop XML creation. The process does not continue with warnings that should block filing. |
+| --- | --- |
+| **HMDA-TO-MCR COMPARISON** State-level counts, dollars, dispositions, and purpose categories are compared with documented exclusions and tolerances. | **MBFRF CONTROLS** Internal financial checks gate the keying package, then MBFRF values are reconciled to MCR and the underlying GL population. |
+| **QUARTER-OVER-QUARTER ANALYSIS** Spikes, unexpected flat lines, new items, and dropped items are surfaced for documented business review. | **POWER BI AND EXCEL REVIEW** Approvers review field codes, labels, current values, and prior-quarter values without reading XML. |
+| **DIGITALLY VERIFIED ARCHIVE** Each final submission is archived with a digital verification code that confirms the file has not changed after submission. | **AMENDMENT AUDIT TRAIL** An amendment restores the submitted version, applies the correction, and produces an element-level comparison between versions. |
+
+|  | **REVIEW DESIGN** **Compliance approves what they can read. They never have to look at XML.** |
+| --- | --- |
+
+| **4** | **BUSINESS IMPACT** |
+| --- | --- |
+
+| **01** | Compresses quarterly assembly from days to under an hour of execution, plus human review. |
+| --- | --- |
+| **02** | Catches reconciliation failures before submission rather than during portal validation or an examination. |
+| **03** | Improves consistency across MCR, HMDA, and the agencies’ quarterly financial reporting. |
+| **04** | Turns examiner requests into controlled retrieval instead of a manual filing reconstruction. |
+| **05** | Reduces key-person dependency through a documented SOP, runbook, and data dictionary. |
+| **06** | Creates a reusable controls pattern for state reports, investor reporting, and compliance exception reporting. |
+
+| **5** | **CONTROL DETAIL** |
+| --- | --- |
+
+| **How are the fourteen rules structured?** Four generic rules cover type, sign, magnitude, and required-item completeness across the catalog. Seven internal reconciliations cross-foot production, MLO, servicing, financial-condition, and repurchase values. Rule 12 compares HMDA with MCR. Rules 13 and 14 validate the MBFRF and reconcile it to MCR. |
+| --- |
+
+| **What does the HMDA-to-MCR comparison do?** The staged LAR (Loan application level)-in-progress is compared with MCR by state for origination counts and dollars, denials and withdrawals, and purchase-purpose activity. Definitional differences are encoded in configuration, and compliance owns the tolerances and exclusions. Findings require disposition but do not block unrelated XML generation. |
+| --- |
+
+| **What does the MBFRF control layer do?** It runs internal financial consistency checks, hard-gates a verified keying package for the web form, and reconciles the MBFRF to MCR so the same GL and loan population tell one story. The reviewed values are then archived with digital verification. |
+| --- |
+
+| **How are review, approval, and amendments controlled?** Power BI supports analysis, while a frozen Excel package records the business-readable sign-off. The approval is linked to the archived filing’s verification code. If a filing is amended, the submitted version is restored and an element-level difference report documents exactly what changed. |
+| --- |
+
+| **What proves the architecture can handle form changes?** The output validates against the official NMLS schema. I also performed a Form Version 6 to Version 7 drill using a regenerate-and-compare process. The drill exposed hidden version assumptions, which were corrected and documented. The upgrade took hours rather than a manual rebuild. |
+| --- |
+
+| **6** | **QUESTIONS YOU’LL LIKELY GET** |
+| --- | --- |
+
+| **Is it production?** Not yet, and deliberately. It uses a deterministic fictional multi-state, multi-MLO dataset so every feature can be demonstrated without exposing confidential information. The staging layer is an interface contract. Connecting a live LOS is primarily a mapping phase, including domain-value mapping and checks that prevent unmapped loans from silently dropping out. |
+| --- |
+
+| **Why not use the LOS vendor’s reporting module or a filing service?** Use them where they add value. They are not competitors to this framework. A vendor module produces numbers and a filing service transmits them. This toolkit adds the judgment-and-evidence layer: reconciliation, documented review, controlled approval, and proof that the archived submission has not changed. It also sits above servicing, GL, and other sources that may not exist in the LOS. |
+| --- |
+
+| **How do you know the numbers are right?** Three layers: schema conformance against the official XSD, fourteen consistency and cross-filing controls, and element-level reasonableness review against the prior quarter. The toolkit cannot independently prove that every source value is correct, so production implementation includes source mapping, controlled manual inputs where needed, and a parallel-run quarter against the existing process. |
+| --- |
+
+| **What happens when NMLS changes the form?** The catalog is regenerated from the new schema, compared with the prior version, and used to identify mapping changes. A full-coverage test confirms that each required element is handled and that the generated XML remains schema-valid. I tested this by upgrading the toolkit from Form Version 6 to Version 7. |
+| --- |
+
+| **Did you use AI?** Yes, as an accelerant and productivity tool. Every architecture decision, control rule, mapping choice, and correction from the version drill is mine, and I can explain or defend the implementation in detail. The relevant point is not that AI produced the system. It is that one analyst can now design and maintain more robust controls with appropriate human judgment. |
+| --- |
+
+| **7** | **ADDITIONAL QUESTIONS** |
+| --- | --- |
+
+| **What is the weakest part, or what remains before production?** The modeled loader covers item groups supported by the available loan-level sources. Fees, reverse-mortgage details, and some financial-condition schedules still require a source feed or controlled manual entry. A real GL integration, source-to-target mapping, security review, parallel run, and operating ownership would be required before production go-live. |
+| --- |
+
+| **Can it run on Snowflake or another database platform?** Yes, with a targeted migration rather than a full redesign. The field catalog, set-based transformations, validation concepts, configurations, and audit model port directly. Stored-procedure syntax and the XML-generation component are platform-specific and would need to be reimplemented and regression-tested. |
+| --- |
+
+| **Could this pattern support other regulatory reporting?** Yes. The reusable pattern is catalog, loader, validator, review package, approval, and archive. The HMDA reconciliation and MBFRF control layers already demonstrate that the controls engine can support both file-based and keyed web-form reporting. State-specific filings, investor QC, and compliance exception reporting can use the same governance structure. |
+| --- |
+
+| **Why reconcile HMDA instead of rebuilding the entire HMDA filing process?** That was a deliberate scope decision. The authoritative HMDA platform already performs its own edit checks, and geocoding introduces external dependencies. Rebuilding that solved function would add risk without improving control. The uncovered gap is cross-filing consistency, so the toolkit focuses on proving that HMDA and MCR tell a consistent story from the same loan population. |
+| --- |
+
+| **What does quarterly operation look like?** The operator registers the filing and runs one controlled procedure. The procedure loads source data, aggregates the 1,228 element values, runs validation, produces variance results, generates output only after blocking errors are cleared, and archives the final artifact. Human effort is concentrated on exceptions, explanations, and approval. |
+| --- |
+
+| **8** | **KEY NUMBERS** |
+| --- | --- |
+
+| **635** **TOTAL REPORTING ITEMS** | **510** **COMPANY-SUBMITTED ITEMS** | **125** **NMLS-CALCULATED ITEMS** |
+| --- | --- | --- |
+| **1,228** **XML ELEMENTS** | **14** **VALIDATION RULES** | **45 DAYS** **MCR FILING DEADLINE** |
+| **UNDER 1 HOUR** **EXECUTION PLUS REVIEW HANDOFF** | **HOURS, NOT WEEKS** **FORM-VERSION UPGRADE** | **1 PROCEDURE** **QUARTERLY ORCHESTRATION** |
+
+| **9** | **POWER STATEMENTS** |
+| --- | --- |
+
+|  | **“Errors block the XML from being generated at all.”** |
+| --- | --- |
+
+|  | **“Compliance approves what they can read. They never have to look at XML.”** |
+| --- | --- |
+
+|  | **“The LOS can give you numbers. This toolkit provides the evidence that the numbers were checked, reviewed, and preserved.”** |
+| --- | --- |
+
+|  | **“The MCR is the proof of concept for a reporting controls platform, not a one-off report.”** |
+| --- | --- |
+
+| **10** | **INTERVIEW DELIVERY NOTES** |
+| --- | --- |
+
+| **01** | Lead with the business problem and the control framework. Mention the technology only after the value is clear. |
+| --- | --- |
+| **02** | Use one number per claim. Do not stack every metric into the same answer. |
+| **03** | Be explicit that this is a portfolio build on fictional data with a documented path to production. |
+| **04** | Use the 30-second answer first. Expand only when the interviewer asks for technical depth. |
+| **05** | Match the interviewer’s altitude. Stay with controls for business leaders; discuss catalog joins, encoding, trigger controls, and schema testing with technical interviewers. |
+| **06** | Select two or three business-impact statements that directly address the department’s pain points. |
+
+|  | **DELIVERY RULE** **Speak it. Do not recite it.** |
+| --- | --- |
+
+*The strongest framing is accurate and restrained: the toolkit demonstrates a complete control architecture, but live deployment still requires source mapping, security, operating ownership, and parallel-run validation.*
+
+| INTERVIEW QUICK REFERENCE  │  REGULATORY REPORTING & CONTROL FRAMEWORK | PAGE 1 |
+| --- | --- |

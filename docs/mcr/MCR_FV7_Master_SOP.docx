@@ -1,0 +1,556 @@
+**MCR FV7 Toolkit - Master SOP**
+
+NMLS Mortgage Call Report (Form Version 7)
+
+SQL Server Filing Toolkit
+
+**Master Standard Operating Procedure**
+
+*Implementation, Source Mapping, Quarterly Operation, and Form-Version Upgrades*
+
+Document version 1.2 - July 2026
+
+Classification: Internal - Regulatory Reporting
+
+# **Contents**
+
+# **1. Introduction**
+
+## **1.1 Purpose**
+
+This document is the single operating procedure for the MCR FV7 SQL Server toolkit. It takes a mortgage company from an empty SQL Server instance to a repeatable, validated, schema-conformant quarterly NMLS Mortgage Call Report filing, and covers the three lifecycle activities in the order a new implementation encounters them:
+
+- **Phase 1-3 (one time):** install the toolkit, map your actual loan origination, servicing, and general ledger data into it, and prove the output against your current filing process.
+
+- **Phase 4 (every quarter):** run the filing pipeline, clear validation, review variance, generate and schema-validate the XML, and submit.
+
+- **Phase 5 (when NMLS changes the form):** regenerate the field catalog from the new XSD, diff, review, and cut over.
+
+## **1.2 Scope and audience**
+
+Audience: a reporting analyst comfortable running T-SQL scripts in SQL Server Management Studio (SSMS), supported by IT for view creation and by finance for financial-condition (FC) schedule values. No part of this procedure requires editing the toolkit's engine code; the implementation work is confined to views and workbook entries.
+
+In scope: the RMLA (per-state and company-level), Financial Condition, and State-Specific (SSSF) sections of the FV7 batch XML, all five repeating detail lists, validation, quarter-over-quarter variance, XML generation, and the Power BI business review layer. Out of scope: the NMLS portal mechanics beyond upload, and accounting policy for FC values.
+
+## **1.3 Companion documents**
+
+| **File** | **Role in this SOP** |
+| --- | --- |
+| MCR_FV7_Master_SOP.docx | This document - the procedure. |
+| MCR_Source_Mapping_Workbook.xlsx | Living implementation record: source inventory, staging interface contract, domain value map, item-to-source lineage, not-loaded register, sign-off. Completed in Phase 2; maintained forever. |
+| MCR_Data_Dictionary.xlsx | Generated dictionary of all 510 submittable items, 1,228 elements, 5 lists, 125 NMLS-calculated items, the toolkit's own table dictionary, and the PBI_Views tab (Power BI semantic layer + model relationship map). Item tabs regenerated on form-version upgrades. |
+| MCR_Governance_Log.xlsx | Standing log: one row per quarterly filing, WARNING dispositions, change log, RACI. |
+| SQL files 01-10 | The filing engine. Run order and purpose in section 2. |
+| 11_pbi_views.sql | Power BI semantic layer: nine star-schema views in the pbi schema. Deployed with the toolkit (3.2); model setup in 3.4. |
+| 12_demo_data_cmg.sql | Optional fictional demo dataset: 'CMG Financial (Fictional Demo)', 5 states, 10 MLOs, two quarters, in the reserved 9000-9999 test range. Stages a matching HMDA LAR and exercises rule 12 when 14 is installed. Training and Power BI demos only; never for real filings. |
+| 14_hmda_recon.sql | Optional HMDA reconciliation control (rule 12): dbo.HmdaLar staging interface, the compliance-owned mcr.HmdaMcrBridge check definitions, mcr.usp_ReconcileHmda, and the pbi.FactHmdaRecon view. Deploy if the company is a HMDA reporter; run before 12 to exercise the demo. |
+| 13_pbi_measures.tmdl | Power BI measures (TMDL): the 25 report measures pasted into the model. Not a SQL file. |
+| Technical_Reference / Validation_Reference / Troubleshooting / MCR_Domain_Primer | Deep-dive references shipped with the toolkit; cited where relevant. |
+
+**NOTE: **The Excel workbooks are deliberately separate from this document so they can be updated quarter to quarter without re-issuing the SOP. Anything that changes with your data lives in Excel; anything that changes with the procedure lives here.
+
+## **1.4 Roles**
+
+| **Role** | **Responsibility** |
+| --- | --- |
+| Reporting analyst | Owns this procedure end to end: runs the pipeline, clears validation, prepares the XML, maintains the mapping workbook and the Power BI review model. |
+| Compliance officer | Accountable for submission, WARNING dispositions, and record retention. |
+| IT / DBA | Creates the database, deploys scripts, creates/maintains the staging views over source systems. |
+| Finance | Supplies FC Schedule values (GL feed or manual entry) each period. |
+
+# **2. How the Toolkit Works**
+
+The design principle: everything the XSD defines is machine-generated into a catalog, and everything downstream is driven by that catalog. You never hand-type element names, and the generator cannot emit an element the schema does not define.
+
+**The file numbers ARE the run order.** Deploy 01 through 08 top to bottom, then 09 is the smoke test, 10 is the coverage proof, and 11 is the Power BI semantic layer. 12 is an optional demo dataset run on demand; 13 is a Power BI model file, not SQL.
+
+| **Script** | **Object(s)** | **What it does** | **Run cadence** |
+| --- | --- | --- | --- |
+| 01_schema_and_source_tables.sql | mcr.Filing + dbo staging tables | Database, mcr schema, filing register, and the seven staging entities the loader reads. Ships with fictional sample data for verification. | Once (deployment) |
+| 02_field_catalog_full.sql | mcr.FieldCatalog(Element), mcr.ListCatalog(Element), mcr.ReportValues, mcr.RepeatingValues, mcr.ValidationResults | GENERATED from the official XSD + NMLS sample workbook by build_catalog.py. 510 items / 1,228 elements / 5 lists. Never hand-edited. Re-running wipes staging. | Once; again on form-version upgrade |
+| 03_load_rmla_from_source.sql | mcr.usp_LoadReportValues | Aggregates the staging entities into element values. Every insert joins the element catalog, so anything the XSD does not define is silently skipped. | Once (deploy); executed each quarter by the pipeline |
+| 04_validation_rules.sql | mcr.usp_ValidateFiling | 11 rules: 4 generic catalog-driven type/completeness rules that cover every element automatically, plus 7 targeted cross-foot and reconciliation rules. ERROR blocks generation; WARNING requires disposition. | Once (deploy) |
+| 05_generate_mcr_xml.sql | mcr.usp_GenerateMcrXml | Catalog-driven XML generator: all sections, per-state Rmla/Sssf wrappers, five lists, correct element order. Refuses to run with open ERRORs unless overridden. | Once (deploy) |
+| 06_qa_variance.sql | mcr.usp_QaVariance | Quarter-over-quarter element-level variance vs the prior filing. | Once (deploy) |
+| 07_orchestration_procs.sql | mcr.usp_CreateFiling, mcr.usp_RunFilingPipeline, mcr.usp_StageFullCoverageDemo | Wraps quarterly operation into single EXECs: load, validate, variance, generate, gated on ERRORs. | Once (deploy) |
+| 08_filing_archive.sql | mcr.FilingArchive + ReportValues/RepeatingValues/ValidationResults history, usp_ArchiveFiling, usp_RunAndArchiveFiling, usp_RecordSubmission, usp_VerifyFilingArchive, usp_ExportArchivedFiling, usp_RestoreFilingData, usp_CompareArchives | Immutable, append-only archive of every generated XML with a SHA-256 integrity hash, plus the full element-level data and validation state behind it. Restore/compare procs support post-submission amendments. Trigger-enforced: no deletes, no edits. | Once (deploy) |
+| 09_run_end_to_end.sql | - | Thin driver: one pipeline EXEC for the sample filing (smoke test). | Reference / smoke test |
+| 10_full_coverage_demo.sql | - | Stages every catalog element and generates a full-coverage XML - the schema-coverage proof used after upgrades. | Verification / upgrades |
+| 11_pbi_views.sql | pbi schema: DimFiling, DimField, DimScope, FactReportValues, FactVariance, FactValidation, FactMloProduction, FactClosedLoans, FactServicing | Power BI semantic layer: read-only star-schema views over the engine, catalog, staging, and dbo source tables. No engine changes; CREATE OR ALTER (idempotent). Column dictionary: MCR_Data_Dictionary.xlsx, PBI_Views tab. | Once (deploy); rerun harmless |
+| 12_demo_data_cmg.sql | Data only (filings 9210 / 9211) | Optional fictional demo dataset: 5 states, 10 MLOs, two quarters, deterministic generation shaped to pass validation with 0 ERRORs. Ends by running the pipeline for 9211. GA volume is +55% QoQ by design so variance produces a real FLAG. | On demand; re-runnable |
+| 13_pbi_measures.tmdl | Power BI model (not SQL) | The 25 report measures (values, variance, controls, production, servicing) as a TMDL Measures table pasted into the PBI model. All math is measures; no calculated columns. | Once per PBI model (3.4) |
+| 14_hmda_recon.sql | dbo.HmdaLar, mcr.HmdaMcrBridge, mcr.usp_ReconcileHmda, pbi.FactHmdaRecon | HMDA reconciliation control (rule 12): compares the HMDA LAR to the MCR per state - originations count/$ (funded channels only; brokered-out loans are on the funding lender's LAR), non-originated dispositions, purchase purpose. Tolerance-based; findings are WARNINGs, never ERRORs. The bridge table holds the checks, tolerances, and documented definitional exclusions. | Once (deploy, optional); proc runs each quarter after the pipeline |
+
+**Quarterly data flow:**
+
+Your LOS / servicing / GL
+
+        |  (staging views - YOUR implementation, Phase 2)
+
+        v
+
+dbo.Applications, dbo.ClosedLoans, dbo.ServicingPortfolio,
+
+dbo.ServicingTransfers, dbo.WarehouseLines, dbo.Repurchases, dbo.Investors
+
+        |  mcr.usp_LoadReportValues        (03)
+
+        v
+
+mcr.ReportValues / mcr.RepeatingValues     (element-level staging)
+
+        |  mcr.usp_ValidateFiling          (04)  -> mcr.ValidationResults
+
+        |  mcr.usp_QaVariance              (06)  -> variance grid
+
+        v
+
+mcr.usp_GenerateMcrXml                     (05)  -> FV7 batch XML
+
+        |
+
+        +-> pbi.* views (11) -> Power BI review model (refresh)
+
+# **3. Phase 1 - One-Time Environment Setup**
+
+Goal: the toolkit installed and proven on its shipped fictional sample data, before any of your data is involved. Budget: under an hour (plus the one-time Power BI model build in 3.4).
+
+## **3.1 Prerequisites**
+
+- SQL Server 2017 or later (the toolkit uses STRING_AGG). Any edition, including Express, works; sizing is trivial - the largest table holds a few thousand rows per filing.
+
+- SSMS (or Azure Data Studio) with rights to create a database, or a DBA who will run 01 for you.
+
+- Python 3.9+ with openpyxl and lxml on one workstation (pip install openpyxl lxml). Used for schema validation on Windows (lxml replaces xmllint) and for catalog regeneration in Phase 5. Linux/macOS users can use xmllint directly.
+
+- Power BI Desktop on the analyst workstation for the review model (3.4).
+
+- The toolkit release folder: SQL files 01-12, 13_pbi_measures.tmdl, build_catalog.py, the official MCRBatchFileSchemaV7.xsd, and the NMLS MCR_FV7Sample.xlsx workbook.
+
+**NOTE: **Get the XSD and sample workbook only from the NMLS Resource Center release package. They are the ground truth the catalog is generated from.
+
+## **3.2 Deploy - run files 01 through 08 plus 11 (and 14 if a HMDA reporter), in order**
+
+In SSMS, open and execute each script against the server, in filename order. Each is idempotent (drops and recreates its objects) and ends with a completion PRINT - confirm it before moving to the next file.
+
+| **Step** | **Run** | **Confirm** |
+| --- | --- | --- |
+| 1 | 01_schema_and_source_tables.sql | Database MCR_Toolkit created; sample filings 2026001 (current, v7) and 2025004 (prior, v7) inserted |
+| 2 | 02_field_catalog_full.sql | Completion print reports 510 items / 1,228 elements / 5 lists |
+| 3 | 03_load_rmla_from_source.sql | 03 complete |
+| 4 | 04_validation_rules.sql | 04 complete |
+| 5 | 05_generate_mcr_xml.sql | 05 complete |
+| 6 | 06_qa_variance.sql | 06 complete |
+| 7 | 07_orchestration_procs.sql | 07 complete (usp_CreateFiling, usp_RunFilingPipeline, usp_StageFullCoverageDemo) |
+| 8 | 08_filing_archive.sql | 08 complete (archive tables + 7 archive procedures) |
+| 9 | 11_pbi_views.sql | 11 complete: pbi.* views created (import all into Power BI) |
+| 10 | 14_hmda_recon.sql (optional - HMDA reporters) | 14 complete: dbo.HmdaLar, mcr.HmdaMcrBridge, mcr.usp_ReconcileHmda, pbi.FactHmdaRecon created |
+
+**NOTE: **02 drops and recreates mcr.ReportValues and mcr.RepeatingValues. Never re-run it mid-quarter with staged data you care about; it is a deployment script, not an operational one. If you are rebuilding from scratch, DROP DATABASE MCR_Toolkit first so no old data survives. 11 is safe to re-run at any time (CREATE OR ALTER, read-only views).
+
+## **3.3 Verify - run 09 (smoke test), then 10 (coverage proof)**
+
+**Step 1.** Run 09_run_end_to_end.sql. It executes mcr.usp_RunFilingPipeline for sample filing 2026001 with @BlockOnError = 1, @RunVariance = 1, @Reload = 1.
+
+**Step 2.** Confirm the stage prints appear (stage 1 prior staging, 2 load, 3 validate, 4 variance, 5 generate), the validation grid shows zero ERRORs, and the final result sets return McrFilingXml (typed XML) and McrFilingText (the string to save).
+
+**Step 3.** In the results grid, click into McrFilingText, copy the full value, and save it as filing_2026001_sample.xml with UTF-8 encoding. Always save McrFilingText, not the @Xml output - only McrFilingText carries the XML prolog.
+
+**Step 4.** Schema-validate it. Windows (PowerShell, one line):
+
+python -c "from lxml import etree; s=etree.XMLSchema(etree.parse('MCRBatchFileSchemaV7.xsd'));
+
+  s.assertValid(etree.parse('filing_2026001_sample.xml')); print('VALID')"
+
+Linux/macOS:
+
+xmllint --noout --schema MCRBatchFileSchemaV7.xsd filing_2026001_sample.xml
+
+**Step 5.** Run 10_full_coverage_demo.sql and schema-validate its FullCoverageText output the same way (save as filing_full_coverage_demo_v7.xml). Its validation grid WILL show reconcile failures - the uniform demo values fail the cross-foots by design; the pass criterion for 10 is schema validity only. This proves every one of the 1,228 elements your catalog can emit is schema-conformant on your install.
+
+If any step fails, stop and resolve using Troubleshooting.docx before proceeding. Phase 2 assumes a clean Phase 1.
+
+## **3.4 Power BI review model - one-time setup**
+
+The review model is where compliance reads variance and controls each quarter; approvers never see XML. Build it once against the deployed pbi views:
+
+- Optionally run 12_demo_data_cmg.sql first so the model has realistic multi-state, multi-MLO data to build against (fictional filings 9210 / 9211; it runs the pipeline itself and finishes with 0 validation ERRORs and one intentional GA variance FLAG).
+
+- Power BI Desktop: Get Data > SQL Server > MCR_Toolkit, select all nine pbi.* views, Import mode.
+
+- Create the relationships exactly per the PBI_Views tab of MCR_Data_Dictionary.xlsx: DimFiling[FilingId] to every fact; DimScope[ScopeKey] to the element facts on ScopeKey and to the loan-grain facts on StateCode; DimField[ItemCode] to FactReportValues and FactVariance only (never to FactValidation - it carries pseudo item codes such as LS_TOTALS).
+
+- Paste the Measures table from 13_pbi_measures.tmdl into the model's TMDL view. All report math is measures; the model needs no calculated columns.
+
+- Build five pages: 1 Filing Overview (Filing Status card, closed volume, state map), 2 Variance Review (FactVariance matrix with the Flag slicer), 3 Controls (FactValidation grid, error/warning cards), 4 MLO Production, 5 Servicing.
+
+**NOTE: **Import mode is deliberate: the dataset is a point-in-time copy, refreshed on demand after a pipeline run (6.3). Do not use DirectQuery; a mid-review reload of staging would silently change the numbers under the reviewer.
+
+# **4. Phase 2 - Mapping Your Actual Data Sources**
+
+This is the real implementation work. The toolkit ships with fictional dbo tables; your job is to replace their contents with your company's data while preserving their exact shape. Everything downstream - loader, validator, generator - is untouched.
+
+The architecture decision that makes this safe: the dbo staging entities are an interface contract, not a suggestion. The loader's aggregation logic is written against their columns and value domains exactly as documented on the Interface_Contract tab of MCR_Source_Mapping_Workbook.xlsx. Your work is translation, not toolkit surgery.
+
+## **4.1 Choose the population strategy**
+
+Two viable patterns. Pick one and record it on the Source_Inventory tab.
+
+| **Pattern** | **How** | **Choose when** |
+| --- | --- | --- |
+| A - ETL into the tables (recommended) | Keep the dbo tables as physical tables. Each quarter, a load job (stored proc, SSIS, ADF, or even INSERT...SELECT scripts) truncates and repopulates them for the FilingId being prepared, applying the domain translations. | Sources are extracts/files, you want a frozen auditable snapshot per filing, or source systems are slow/remote. |
+| B - Views in place of tables | Drop the physical dbo tables and create views of the same names and columns over your LOS/servicing schemas (or synonyms to another database), translating values inline. | Sources are live SQL Server databases you can query directly and you accept that re-running the pipeline later re-reads current source state. |
+
+**NOTE: **Pattern A's frozen snapshot is worth a lot in a regulated filing: the numbers you validated are the numbers you submitted, and you can re-generate the identical XML months later. Pattern B trades that for zero ETL. If in doubt, use A.
+
+## **4.2 Inventory your sources**
+
+- Open MCR_Source_Mapping_Workbook.xlsx, Source_Inventory tab. For each of the seven staging entities plus the FC schedules, fill the yellow cells: source system, source object, refresh cadence, extraction owner.
+
+- Confirm the as-of rules against your systems: Applications and ClosedLoans and Repurchases and ServicingTransfers are period activity; ServicingPortfolio and WarehouseLines are period-end snapshots. If a source cannot produce the required as-of view, resolve that now - it is a data availability problem no mapping fixes.
+
+- If the company is a HMDA reporter, add dbo.HmdaLar to the source inventory: the LAR-in-progress from the LOS/HMDA-prep system, mapped the same way as the other staging entities (action taken codes, property state, amount, purpose), stamped with the FilingId of the MCR period it overlaps. This feeds the rule 12 reconciliation (6.3); the bridge tolerances and exclusions in mcr.HmdaMcrBridge are compliance-owned decisions, reviewed like domain mappings.
+
+- Identify who owns the FC Schedule values. In production these come from the general ledger (finance-fed); the toolkit stages them as direct element inserts with ScopeKey = 'FC' (see 4.6).
+
+## **4.3 Map the domain values**
+
+The loader recognizes only the toolkit domain values (e.g., Channel must be exactly Brokered, ClosedRetail, or ClosedWholesale). Your LOS speaks its own codes. The Domain_Value_Map tab is where every raw code is translated, and it is the single most important artifact in the implementation: an unmapped value does not error - it silently drops those loans out of the filing.
+
+- For each of the 16 mapped columns pre-listed on the Domain_Value_Map tab, query the distinct raw values in your source for a recent full quarter, e.g.:
+
+SELECT LoanChannelCode, COUNT(*) AS Loans
+
+FROM los.dbo.Loan
+
+WHERE CloseDate >= '2026-01-01' AND CloseDate < '2026-04-01'
+
+GROUP BY LoanChannelCode
+
+ORDER BY Loans DESC;
+
+- Add one workbook row per raw value, including NULL and legacy/retired codes, mapping each to exactly one target value. Where a raw value legitimately means 'exclude from this filing population' (e.g., a HELOC product outside MCR scope), record that explicitly in Notes rather than leaving it unmapped.
+
+- Ambiguous mappings are compliance calls, not analyst calls. Typical ones: which statuses count as Received vs InProcess; what your investor codes roll to (FNMA / FHLMC / GNMA / PrivateLabel / Other); QM designation source of truth. Get the compliance officer's decision and cite it in Notes.
+
+- Build the translation into your load job or views with CASE expressions, and make the ELSE branch loud, not silent:
+
+Channel = CASE l.LoanChannelCode
+
+            WHEN 'BRK'  THEN 'Brokered'
+
+            WHEN 'RET'  THEN 'ClosedRetail'
+
+            WHEN 'WHL'  THEN 'ClosedWholesale'
+
+            ELSE 'UNMAPPED:' + ISNULL(l.LoanChannelCode,'NULL')
+
+          END
+
+- Add a standing pre-run check that fails the quarter if anything is unmapped:
+
+SELECT 'ClosedLoans' AS Src, Channel AS BadValue, COUNT(*) AS Rows
+
+FROM dbo.ClosedLoans
+
+WHERE FilingId = @FilingId AND Channel LIKE 'UNMAPPED:%'
+
+GROUP BY Channel;
+
+-- repeat per mapped column; zero rows required before the pipeline runs
+
+**NOTE: **The generic validator rules will catch type problems, and the UNMAPPED prefix will also fail the loader's element join harmlessly - but the check above is the only thing that tells you WHICH loans fell out and why. Run it every quarter, not just at implementation.
+
+## **4.4 Build the population layer**
+
+- For Pattern A: write one load procedure per staging entity (or one SSIS/ADF pipeline) that deletes rows for the target FilingId and repopulates them from source with the translations applied, stamping FilingId on every row. Keep these procedures in source control; log every change on the Change_Log tab of MCR_Governance_Log.xlsx.
+
+- For Pattern B: script out the dbo tables (for rollback), drop them, and create same-named views. The view must project every contract column with the contract type. Derive FilingId by joining mcr.Filing on the period, e.g. WHERE l.CloseDate BETWEEN f.PeriodStart AND f.PeriodEnd.
+
+- Mind the documented sizing trap: OwnershipType's longest value, SubservicingForOthers, is 21 characters. The contract type is VARCHAR(30); if you introduce intermediate tables, do not size that column at VARCHAR(20) - SQL Server truncates silently and the value then fails the loader's mapping.
+
+- Populate dbo.Investors as reference data (your investor roster with NMLS IDs, names, pool numbers). It drives the Section III investor detail lists; stale names here become stale names in the filing.
+
+## **4.5 Decide the not-loaded items**
+
+The loader automates the item groups on the Item_Mapping tab. The remainder of the 510-item catalog is fully supported by the validator and generator but has no automated source in the shipped loader - the Not_Loaded_Register tab lists the groups (Section I fees AC600-630, reverse mortgage AC700-890, Section II detail items, loan modifications, serviced-loan rate/LTV distributions, FC Schedules B/C/D, SSSF, and so on).
+
+- For each register group, record one decision: Manual entry (stage values by INSERT each quarter), Build feed (extend your load job to populate them - they load exactly like every other element: insert rows into mcr.ReportValues keyed by ScopeKey and ElementName), or Not applicable (your business does not do reverse, does not service, etc.).
+
+- For Manual-entry items, add the INSERT statements to a per-quarter worksheet script so they are repeatable, and run them after the pipeline load stage using @Reload = 0 on subsequent pipeline calls (section 6.3) so they are not wiped.
+
+**NOTE: **Completeness rule 4 of the validator flags required items missing for a filed state, so a wrong 'Not applicable' decision surfaces as an ERROR rather than a silent gap.
+
+## **4.6 Wire the FC schedules**
+
+- FC values are direct element inserts with ScopeKey = 'FC'. Replace the shipped stub block with your GL feed or a controlled manual-entry script:
+
+INSERT INTO mcr.ReportValues (FilingId, ScopeKey, ElementName, NumValue)
+
+VALUES (@FilingId, 'FC', 'A010_1', @CashAndEquivalents),
+
+       (@FilingId, 'FC', 'A038_1', @LoansHeldForSale);
+
+-- element names per MCR_Data_Dictionary.xlsx, Elements tab, Scope = FC
+
+- Do not hand-stage O360/O370 (repurchase memo): the loader derives them from dbo.Repurchases, and validator rule 11 reconciles them to the state-level AC1000 totals. Feeding them separately from a different source is how that rule fails.
+
+- FC amounts are whole dollars; Dollar-typed elements accept negatives (e.g., a net loss in O330), PositiveDollar elements do not. The dictionary's DataType column is authoritative.
+
+## **4.7 Smoke test on real data**
+
+- Register a real prior quarter as the test filing (use a spare FilingId range, e.g. 9001):
+
+EXEC mcr.usp_CreateFiling
+
+     @FilingId = 9001, @CompanyNmlsId = <your NMLS ID>,
+
+     @CompanyName = '<legal name>', @Year = 2026,
+
+     @PeriodType = 'MCRQ1',
+
+     @PeriodStart = '2026-01-01', @PeriodEnd = '2026-03-31',
+
+     @PrimaryStateCode = 'OK';
+
+- Populate the staging entities for 9001 (run your Pattern A load, or verify the Pattern B views return rows for it), run the unmapped-value check from 4.3, then:
+
+DECLARE @Xml NVARCHAR(MAX);
+
+EXEC mcr.usp_RunFilingPipeline @FilingId = 9001,
+
+     @BlockOnError = 1, @RunVariance = 0, @Reload = 1,
+
+     @Xml = @Xml OUTPUT;
+
+- Work the validation grid to zero ERRORs. Expect real findings on a first pass - the reconciliation rules (MLO totals vs AC070, QM cross-foot, state Section III vs company LS, AC1000 vs O360) are precisely where source-system inconsistencies show up. Fix data or mappings, not the rules.
+
+- Save the XML and schema-validate exactly as in 3.3. Then spot-audit a handful of numbers end to end: pick one state's AC070, trace it via the Item_Mapping tab back to the loan-level rows, and tie it to your LOS report for the same period.
+
+## **4.8 Exit criteria**
+
+Phase 2 is done when every line on the Sign_Off tab of the mapping workbook is completed and approved: views/loads deployed, zero unmapped values, register decisions recorded, clean pipeline run, and schema-valid XML on real data.
+
+# **5. Phase 3 - Parallel Run and Go-Live**
+
+- For one full quarter, prepare the filing both ways: your existing process (manual workbook or vendor tool) and this toolkit.
+
+- Reconcile item by item. The variance proc helps only against a prior toolkit filing, so for the parallel quarter export mcr.ReportValues for the filing and compare against the legacy numbers in Excel. Every difference gets a root cause: source timing, mapping decision, or a genuine legacy error (these are common - manual processes drift).
+
+- Have compliance approve the reconciliation, complete the final Sign_Off rows, and submit from the toolkit output the following quarter.
+
+- Archive the parallel-run workpaper with the governance log. It is the evidence for 'why do these numbers differ from last quarter's methodology' questions from regulators.
+
+# **6. Phase 4 - Quarterly Filing Procedure**
+
+Steady-state operation. Elapsed time excluding data fixes: under an hour. NMLS quarterly MCR deadlines are 45 days after quarter end; start when your servicing snapshot and GL close are final, not on the deadline.
+
+## **6.1 Pre-run checklist**
+
+- Source period is closed: LOS pipeline statuses final, servicing period-end snapshot cut, GL closed for FC values.
+
+- dbo.Investors roster current.
+
+- Open MCR_Governance_Log.xlsx and start the Filing_Log row for the period.
+
+## **6.2 Register the filing**
+
+EXEC mcr.usp_CreateFiling
+
+     @FilingId         = 2026002,           -- your convention
+
+     @CompanyNmlsId    = <NMLS ID>,
+
+     @CompanyName      = '<legal name>',
+
+     @Year             = 2026,
+
+     @PeriodType       = 'MCRQ2',           -- MCRQ1..MCRQ4, MCRANNUAL
+
+     @PeriodStart      = '2026-04-01',
+
+     @PeriodEnd        = '2026-06-30',
+
+     @PrimaryStateCode = 'OK',
+
+     @PriorFilingId    = 2026001;           -- enables variance
+
+The proc validates existence, prior-filing linkage, and period sanity before inserting. FormVersion defaults to 'v7'.
+
+## **6.3 Populate staging and run the pipeline**
+
+- Run your Phase 2 population layer for the new FilingId (Pattern A load job; Pattern B is automatic). Run the unmapped-value check; require zero rows.
+
+- Run any Manual-entry inserts from your not-loaded worksheet script (4.5) and the FC feed (4.6) if they are separate from the load job.
+
+- Execute the pipeline:
+
+DECLARE @ArchiveId INT;
+
+EXEC mcr.usp_RunAndArchiveFiling
+
+     @FilingId     = 2026002,
+
+     @BlockOnError = 1,   -- never 0 for a real submission
+
+     @RunVariance  = 1,
+
+     @Reload       = 1,   -- 0 = keep existing staging (preserves
+
+                          --     manual FC/not-loaded entries on reruns)
+
+     @Notes        = N'Q2 2026 production run',
+
+     @ArchiveId    = @ArchiveId OUTPUT;
+
+This runs the full pipeline (load, validate, variance, generate) and, if XML is produced, archives to immutable history: the XML with its SHA-256 hash, every element value and list row behind it, and the validation state. Note the returned ArchiveId in the Filing_Log; reruns create new archive rows, never overwrite.
+
+- If the HMDA layer (14) is deployed: EXEC mcr.usp_ReconcileHmda @FilingId = <id> AFTER the pipeline. Order matters - usp_ValidateFiling deletes every validation row for the filing, so the reconciliation must run last or its findings are wiped. It returns a PASS/WARN grid per state and check and writes breaches as rule 12 WARNINGs (RuleType HMDA_RECON); it never blocks generation.
+
+**NOTE: **@Reload interplay: a full run uses @Reload = 1. If you then add manual entries and rerun, call with @Reload = 0 or the load stage wipes and re-stages, discarding them. Alternatively, fold all manual entries into the load job so @Reload = 1 is always safe - the better long-term pattern.
+
+## **6.4 Clear validation**
+
+- Review the validation grid (also queryable: SELECT * FROM mcr.ValidationResults WHERE FilingId = 2026002 ORDER BY Severity, RuleType; or the Controls page of the Power BI review model after a refresh).
+
+- ERROR rows: generation is blocked until they are fixed at the source or mapping and the pipeline rerun. Never work around an ERROR with @BlockOnError = 0 for a filing you intend to submit.
+
+- WARNING rows: each needs a documented disposition on the Validation_Exceptions tab - root cause, decision, whether an explanatory note element was filed, approver. Large quarter-over-quarter swings that are real (an acquisition, a new state) are the classic legitimate WARNING.
+
+Rule summary (details in Validation_Reference):
+
+| **#** | **Rule** | **Type** |
+| --- | --- | --- |
+| 1 | PositiveDollar/Count elements must be >= 0 | Generic (catalog-driven) |
+| 2 | Integer-typed elements must be whole numbers | Generic |
+| 3 | 13-digit XSD magnitude ceiling | Generic |
+| 4 | Required items present per filed state | Generic |
+| 5 | QM split AC920-940 cross-foots to AC070, $ and #, per state | Reconciliation |
+| 6 | Closed-loan grids tie to each other per state | Reconciliation |
+| 7 | MLO list totals = AC070 per state | Reconciliation |
+| 8 | Nationwide LS partitions tie (investor leg active on FV7+) | Reconciliation |
+| 9 | State Section III rolls up to nationwide LS | Reconciliation |
+| 10 | Investor detail lists tie to S520/S530/S540 | Reconciliation |
+| 11 | FC repurchase memo O360 = sum of state AC1000 | Reconciliation |
+| 12 | HMDA LAR ties to MCR per state within documented tolerances (originations count/$, dispositions, purchase purpose) - optional, WARNING-only, runs after the pipeline | Cross-filing reconciliation (14) |
+
+## **6.5 Review variance (Power BI review model)**
+
+- Refresh the Power BI dataset (Import mode; Home > Refresh) so it reflects the run you just executed - the model is a point-in-time copy and does not update itself.
+
+- Review the Variance Review page (FactVariance) against the prior filing: work the Flag slicer (FLAG / NEW / DROPPED) first, then scan the full matrix. You are looking for explainable movement; flat lines where you know business moved are as suspicious as spikes. Note material explanations in the Filing_Log row.
+
+- The usp_QaVariance grid in SSMS remains the equivalent fallback; both read the same staging. Compliance review happens in the PBI model - approvers never see XML or raw staging.
+
+## **6.6 Export and schema-validate the XML**
+
+- From the pipeline's final result sets, copy McrFilingText (not McrFilingXml) in full and save as MCR_<year>_<period>.xml with UTF-8 encoding.
+
+**NOTE: **McrFilingText is the string with the XML prolog prepended by the driver. The prolog is intentionally absent from the generated string itself: an encoding="utf-8" prolog inside an NVARCHAR causes SQL Server error 9402 on the typed-XML cast (internal encoding is UTF-16). Do not 'fix' the generator to add it.
+
+- Schema-validate against MCRBatchFileSchemaV7.xsd using the 3.3 command. VALID is a gate: no valid, no upload.
+
+## **6.7 Submit and archive**
+
+- Upload through the NMLS portal per its current process; record the confirmation number in the Filing_Log and stamp the archive:
+
+EXEC mcr.usp_RecordSubmission
+
+     @ArchiveId        = @ArchiveId,
+
+     @SubmittedDate    = '2026-08-10',
+
+     @NmlsConfirmation = 'NMLS-XXXXXXXX';
+
+- The database is now the system of record: mcr.FilingArchive holds the exact submitted text (usp_ExportArchivedFiling reproduces the file at any time, integrity-verified), and the history tables hold every element value, list row, and validation result behind it. If a report must be amended or appended after submission, usp_RestoreFilingData rehydrates staging from the submitted archive, the amendment is applied and re-run with @Reload = 0 as a new archive row, and usp_CompareArchives produces the element-level audit trail of what changed (full examples: Stored Procedure Runbook, 4.4). Additionally archive per retention policy: the uploaded .xml, the validator export, the variance export, and WARNING dispositions. Complete the Filing_Log row: preparer, reviewer, dates.
+
+- Periodically (at least each quarter-end), run EXEC mcr.usp_VerifyFilingArchive to re-hash every archived filing and prove nothing has been altered since generation. File the VERIFIED output with the governance log.
+
+- Do not delete or re-run the filing's staging afterward. Next quarter's variance uses it as the baseline via @PriorFilingId.
+
+# **7. Phase 5 - Form-Version / XSD Upgrade**
+
+When NMLS publishes a new form version (FV8+), a new batch XSD and sample workbook ship with it. Because the catalog is generated, the upgrade is a regenerate-diff-review cycle measured in hours, not a rebuild. Start when NMLS publishes the draft - they announce with lead time. This section is the condensed procedure; SOP_Catalog_Regeneration is the keystroke-level companion and Upgrade_Procedure the change-management framing.
+
+## **7.1 What changes vs what does not**
+
+| **Layer** | **On a new form version** |
+| --- | --- |
+| 02 catalog | Regenerated by build_catalog.py - zero manual edits. |
+| 03 loader | Reviewed - only mappings touching added/renamed/removed items change. |
+| 04 validator | Generic rules 1-4 unchanged (they read the catalog). Targeted rules 5-11 reviewed against the diff. |
+| 05 generator | Unchanged unless the XSD restructures top-level sections, wrappers, or attributes. |
+| 06 / 07 / 08 / 09 / 10 | Unchanged. 10 is the coverage proof against the new schema. |
+| 11 pbi views / 13 measures | Unchanged - the views read the catalog and staging generically, so new items flow through automatically. Review only if a report page groups by a section that was restructured. |
+| 14 HMDA recon | Reviewed - the checks reference specific item codes (AC920-940, AC030-060, AC300) and the funded column groups. If the diff touches those items or the column-pair convention, update the proc and the bridge descriptions together. |
+| Excel companions | Regenerate MCR_Data_Dictionary.xlsx item tabs; the PBI_Views and Toolkit_Tables tabs carry forward. Review Item_Mapping and Not_Loaded_Register tabs against the diff. |
+
+## **7.2 Procedure**
+
+- Collect from the NMLS Resource Center: the new MCRBatchFileSchemaV{N}.xsd, the new sample workbook, and NMLS's own Fields Added/Removed and Label Changes documents (the FV7 workbook carried both as tabs; expect the same). Exact filenames vary by release - use what NMLS shipped.
+
+- Verify the generator script's structural assumptions against the new XSD's top matter: root <Mcr>; Rmla/Sssf per-state wrappers with stateCode; leaf elements named ITEM_n with the (2g-1, 2g) pair convention; repeating lists as ListSectionOf.../DetailItemList items containing ItemId. If NMLS restructured any of these, build_catalog.py needs a matching change first.
+
+- Snapshot the current model, regenerate, and diff (PowerShell: each command is ONE line - no line continuation characters):
+
+python build_catalog.py MCRBatchFileSchemaV7.xsd MCR_FV7Sample.xlsx -o old_02.sql -m model_v7.json
+
+python build_catalog.py MCRBatchFileSchemaV8.xsd MCR_FV8Sample.xlsx -o 02_field_catalog_full.sql -m model_v8.json
+
+python build_catalog.py --diff model_v7.json model_v8.json
+
+- Cross-check the printed diff (items added/removed, elements retyped, items moved section, lists added/removed) against NMLS's own added/removed list. They must agree; investigate any disagreement before touching SQL.
+
+- Review the loader (03) line by line against the diff: removed item - delete/comment the mapping (leaving it is harmless, the element join skips it, but it is misleading); added item - map a source using the standard pattern or add it to the Not_Loaded_Register; renamed item (removed+added with the same label per NMLS's label tab) - update the CASE literal.
+
+- Review validator rules 5-11: do any reference removed items, and do new items belong inside an existing reconciliation (e.g., a new investor row in the LS partition)?
+
+- Deploy in a non-production database first: run the new 02 (remember: it wipes staging), then 03/04 if changed, then run 10 and schema-validate the full-coverage XML against the NEW XSD. This is the step that catches structural regressions - the historical example being SSSF attribute leakage (see 8.3) - because it exercises every element path.
+
+- Parallel-prove one real quarter on the new version in the test database, then deploy to production, set @FormVersion = 'v8' on new filings via usp_CreateFiling, update 01_schema_and_source_tables.sql (the FormVersion column default AND the sample-filing seed rows - a stale default silently versions demo/test filings like 9999 to the old form), regenerate MCR_Data_Dictionary.xlsx item tabs from the new model JSON, update the mapping workbook tabs, and log the upgrade on the Change_Log. Never patch version fixes into generated files (02); they are lost on regeneration.
+
+**NOTE: **Effective-date discipline: file the OLD version for periods before the NMLS effective date and the new version after. Both catalogs cannot coexist in one database (02 replaces the catalog), so hold the cutover until the last old-version filing is submitted, or use a second database for the transition quarter.
+
+# **8. Appendices**
+
+## **8.1 Quarterly quick card**
+
+| **#** | **Action** | **Gate** |
+| --- | --- | --- |
+| 1 | Sources closed; Investors roster current; start Filing_Log row |  |
+| 2 | EXEC mcr.usp_CreateFiling for the period |  |
+| 3 | Run population layer; unmapped-value check | 0 unmapped rows |
+| 4 | Manual FC / not-loaded entries |  |
+| 5 | EXEC mcr.usp_RunAndArchiveFiling (@BlockOnError = 1); note ArchiveId; EXEC mcr.usp_ReconcileHmda (if HMDA layer deployed) | 0 ERRORs; archived |
+| 6 | Refresh Power BI review model; disposition WARNINGs; review variance (Variance Review + Controls pages) | Dispositions logged |
+| 7 | Save McrFilingText as UTF-8 .xml; schema-validate | VALID |
+| 8 | Upload to NMLS; usp_RecordSubmission; verify archive; file evidence | Filing_Log complete; VERIFIED |
+
+## **8.2 FilingId and file naming conventions**
+
+- FilingId: YYYYQ0N (2026001 = 2026 Q1) - the shipped sample data, drivers, and this SOP all use it. Reserve 9000-9999 for tests and demos (9001 = Phase 2 smoke test, 9210/9211 = CMG demo dataset prior/current, 9999 = coverage demo). The toolkit itself only requires uniqueness.
+
+- XML files: MCR_<year>_<PeriodType>.xml, e.g. MCR_2026_MCRQ2.xml.
+
+- Evidence folder per filing: the .xml, validator export, variance export, and the Filing_Log row reference.
+
+## **8.3 Known gotchas (learned the hard way)**
+
+| **Symptom** | **Cause** | **Rule** |
+| --- | --- | --- |
+| Msg 9402 casting generated XML to typed XML | encoding="utf-8" prolog inside an NVARCHAR string (internal encoding is UTF-16) | The generator emits no prolog; the driver prepends it to the text output only. Keep it that way. |
+| Schema-invalid output after an upgrade, only on some sections | Structural attribute leakage - historically, <Sssf> carries only stateCode, and the generator once emitted the four <Mcr>-level attributes on it too | Always run 10 (full coverage) + schema validation after any generator or catalog change; the sample filing alone does not exercise every path. |
+| PRINT fails with a subquery error in custom scripts | SQL Server disallows subqueries in PRINT's scalar context | Pre-compute counts into variables before PRINT. |
+| A servicing category vanishes from the filing | VARCHAR(20) truncation of SubservicingForOthers (21 chars) in a custom intermediate table | Size domain columns per the Interface_Contract tab; the contract uses VARCHAR(30). |
+| Loans silently missing from totals | Unmapped raw domain value in a staging view | The UNMAPPED: prefix pattern + the pre-run check (4.3) are mandatory. |
+| Manual FC entries disappear on rerun | Pipeline rerun with @Reload = 1 wipes and re-stages | Use @Reload = 0 on reruns after manual entry, or fold manual entries into the load job. |
+| Power BI review numbers do not match the run just executed | Import-mode dataset not refreshed after the pipeline run | Refresh is step 1 of the review (6.5). Never review against a stale dataset. |
+| HMDA rule 12 findings vanish after a rerun | usp_ValidateFiling (and therefore every pipeline run) deletes all validation rows for the filing, including HMDA_RECON | Always run usp_ReconcileHmda after the pipeline, never before. It is the last step of 6.3. |
+
+## **8.4 Record of changes to this SOP**
+
+| **Version** | **Date** | **Author** | **Change** |
+| --- | --- | --- | --- |
+| 1.0 | July 2026 |  | Initial issue. |
+| 1.1 | July 2026 |  | Added the Power BI business review layer: 11_pbi_views.sql joins the deploy sequence (3.2 step 9), new 3.4 covers the one-time PBI model build, 6.4/6.5 route the quarterly controls and variance review through the model, and 12_demo_data_cmg.sql / 13_pbi_measures.tmdl documented (1.3, section 2). Demo FilingIds 9210/9211 reserved (8.2). No changes to scripts 01-10 or to any stored procedure. |
+| 1.2 | July 2026 |  | Added the HMDA reconciliation control (14_hmda_recon.sql): optional deploy step 10 (3.2), LAR source-inventory guidance (4.2), quarterly execution order after the pipeline (6.3), rule 12 in the validation summary (6.4), upgrade-review note (7.1), quick-card and gotcha updates (8.1, 8.3). WARNING-only cross-filing control; no changes to scripts 01-10. |
