@@ -1,0 +1,37 @@
+# Credentials and personal references
+*Account_Reference*
+*credential*
+*.publishsettings
+appsettings.*.json
+.env
+
+# SQL Server / SSMS
+*.bak
+*.trn
+*.mdf
+*.ldf
+*.ndf
+*.sqlsuo
+*.dtsx.user
+
+# Power BI
+*.pbix
+*.pbip.user
+.pbi/
+**/.pbi/localSettings.json
+*.abf
+
+# Office temp
+~$*
+*.tmp
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Editors
+.vs/
+.vscode/
+*.suo
+*.user
